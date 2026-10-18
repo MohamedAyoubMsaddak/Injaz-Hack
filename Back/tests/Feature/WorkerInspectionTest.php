@@ -66,6 +66,19 @@ class WorkerInspectionTest extends TestCase
         ])->assertUnprocessable()->assertJsonValidationErrors('role');
     }
 
+    public function test_staff_command_refuses_to_create_more_than_six_workers(): void
+    {
+        foreach (range(1, 6) as $number) {
+            $this->worker('worker'.$number.'@example.test');
+        }
+
+        $this->artisan('housing:create-staff', ['role' => 'worker'])
+            ->expectsOutputToContain('The maximum of six worker accounts has already been reached.')
+            ->assertExitCode(1);
+
+        $this->assertSame(6, User::query()->where('role', 'worker')->count());
+    }
+
     public function test_unauthenticated_students_and_owners_cannot_access_worker_endpoints(): void
     {
         $this->getJson('/api/worker/dashboard')->assertUnauthorized();

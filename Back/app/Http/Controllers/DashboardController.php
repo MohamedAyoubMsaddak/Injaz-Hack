@@ -20,7 +20,7 @@ class DashboardController extends Controller
     public function owner(Request $request): JsonResponse
     {
         $owner = $request->user();
-        $houses = $owner->houses();
+        $houses = $owner->houses()->whereNull('listing_archived_at');
         $subscriptions = OwnerSubscription::query()
             ->where('owner_id', $owner->id)
             ->with([

@@ -1,14 +1,20 @@
 <?php
 
+use App\Http\Controllers\AdminHouseController;
 use App\Http\Controllers\AdminInspectionController;
+use App\Http\Controllers\AdminMoveOutReportController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\HousePriceNegotiationController;
 use App\Http\Controllers\MaintenanceRequestController;
 use App\Http\Controllers\OwnerHouseController;
+use App\Http\Controllers\OwnerConditionReportNotificationController;
+use App\Http\Controllers\OwnerRentalNotificationController;
+use App\Http\Controllers\OwnerRentPaymentReminderController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\RentalRequestController;
 use App\Http\Controllers\StudentHousingController;
+use App\Http\Controllers\StudentMyHouseController;
 use App\Http\Controllers\WorkerInspectionController;
 use Illuminate\Support\Facades\Route;
 
@@ -37,9 +43,17 @@ Route::prefix('api')->group(function () {
             Route::get('/dashboard', [StudentHousingController::class, 'dashboard']);
             Route::get('/houses', [StudentHousingController::class, 'index']);
             Route::get('/houses/{house}', [StudentHousingController::class, 'show']);
+            Route::post('/houses/{house}/check-requests', [StudentHousingController::class, 'requestCheck'])
+                ->middleware('throttle:10,1');
             Route::get('/houses/{house}/photos/{photo}', [StudentHousingController::class, 'photo'])
                 ->name('student.houses.photos.show');
+            Route::get('/house-check-requests/{inspection}/photos/{photo}', [StudentHousingController::class, 'checkPhoto'])
+                ->name('student.house-check-requests.photos.show');
             Route::get('/rental-requests', [RentalRequestController::class, 'studentIndex']);
+            Route::get('/my-houses', [StudentMyHouseController::class, 'index']);
+            Route::post('/rental-requests/{rentalRequest}/move-out-reports', [StudentMyHouseController::class, 'submitMoveOutReport'])
+                ->middleware('throttle:10,1');
+            Route::get('/house-check-requests', [StudentHousingController::class, 'checkRequests']);
             Route::get('/payments', [PaymentController::class, 'studentIndex']);
             Route::post('/rental-requests', [RentalRequestController::class, 'store'])
                 ->middleware('throttle:20,1');
@@ -64,15 +78,24 @@ Route::prefix('api')->group(function () {
             Route::post('/houses', [OwnerHouseController::class, 'store']);
             Route::get('/houses/{house}', [OwnerHouseController::class, 'show']);
             Route::put('/houses/{house}', [OwnerHouseController::class, 'update']);
+            Route::post('/houses/{house}/deletion-request', [OwnerHouseController::class, 'requestDeletion'])
+                ->middleware('throttle:10,1');
             Route::get('/houses/{house}/photos/{photo}', [OwnerHouseController::class, 'photo'])
                 ->name('owner.houses.photos.show');
             Route::get('/rental-requests', [RentalRequestController::class, 'ownerIndex']);
+            Route::get('/condition-report-notifications', [OwnerConditionReportNotificationController::class, 'index']);
+            Route::post('/condition-report-notifications/{inspection}/read', [OwnerConditionReportNotificationController::class, 'read']);
+            Route::get('/rent-payment-reminders', [OwnerRentPaymentReminderController::class, 'index']);
+            Route::post('/rent-payment-reminders/{reminder}/read', [OwnerRentPaymentReminderController::class, 'read']);
+            Route::get('/rental-notifications', [OwnerRentalNotificationController::class, 'index']);
+            Route::post('/rental-notifications/{notification}/read', [OwnerRentalNotificationController::class, 'read']);
             Route::post('/subscriptions/{subscription}/payment', [PaymentController::class, 'prepareOwnerSubscription'])
                 ->middleware('throttle:10,1');
             Route::post('/rental-requests/{rentalRequest}/decision', [RentalRequestController::class, 'respond'])
                 ->middleware('throttle:20,1');
             Route::post('/rental-requests/{rentalRequest}/confirm-secured', [RentalRequestController::class, 'confirmOwner'])
                 ->middleware('throttle:20,1');
+            Route::get('/repair-reports', [MaintenanceRequestController::class, 'ownerRepairReports']);
             Route::get('/maintenance-requests', [MaintenanceRequestController::class, 'ownerIndex']);
             Route::post('/maintenance-requests/{maintenanceRequest}/acknowledge', [MaintenanceRequestController::class, 'ownerAcknowledge'])
                 ->middleware('throttle:20,1');
@@ -106,6 +129,15 @@ Route::prefix('api')->group(function () {
         Route::prefix('admin')->middleware('role:admin')->group(function () {
             Route::get('/workers', [AdminInspectionController::class, 'workers']);
             Route::get('/inspection-reviews', [AdminInspectionController::class, 'pendingReviews']);
+            Route::get('/student-inspection-requests', [AdminInspectionController::class, 'studentRequests']);
+            Route::get('/move-out-reports', [AdminMoveOutReportController::class, 'index']);
+            Route::post('/move-out-reports/{report}/review', [AdminMoveOutReportController::class, 'review'])
+                ->middleware('throttle:20,1');
+            Route::get('/houses', [AdminHouseController::class, 'index']);
+            Route::put('/houses/{house}', [AdminHouseController::class, 'update'])
+                ->middleware('throttle:20,1');
+            Route::delete('/houses/{house}', [AdminHouseController::class, 'destroy'])
+                ->middleware('throttle:10,1');
             Route::get('/price-negotiations', [HousePriceNegotiationController::class, 'index']);
             Route::get('/houses/{house}/photos/{photo}', [HousePriceNegotiationController::class, 'photo'])
                 ->name('admin.houses.photos.show');
@@ -114,6 +146,8 @@ Route::prefix('api')->group(function () {
             Route::patch('/houses/{house}/price-negotiation', [HousePriceNegotiationController::class, 'update'])
                 ->middleware('throttle:20,1');
             Route::post('/houses/{house}/inspection-assignment', [AdminInspectionController::class, 'assign'])
+                ->middleware('throttle:20,1');
+            Route::post('/inspections/{inspection}/assignment', [AdminInspectionController::class, 'assignStudentRequest'])
                 ->middleware('throttle:20,1');
             Route::post('/inspections/{inspection}/decision', [AdminInspectionController::class, 'decide'])
                 ->middleware('throttle:20,1');

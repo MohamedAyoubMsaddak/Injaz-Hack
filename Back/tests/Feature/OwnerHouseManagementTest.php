@@ -85,6 +85,53 @@ class OwnerHouseManagementTest extends TestCase
         $this->assertSame('Private house', $otherHouse->fresh()->title);
     }
 
+    public function test_owner_removal_request_waits_for_administrator_approval(): void
+    {
+        $owner = $this->owner();
+        $otherOwner = $this->owner('other-owner@example.test');
+        $house = $this->createHouse($owner, ['verification_status' => 'verified']);
+        $otherRejectedHouse = $this->createHouse($otherOwner, ['verification_status' => 'rejected']);
+
+        $this->actingAs($owner)
+            ->postJson('/api/owner/houses/'.$house->id.'/deletion-request')
+            ->assertStatus(202)
+            ->assertJsonPath('house_id', $house->id)
+            ->assertJsonPath('message', 'Your removal request was sent to the administrator. The house will remain listed until approved.');
+
+        $this->assertTrue($house->fresh()->available);
+        $this->assertNotNull($house->fresh()->owner_deletion_requested_at);
+        $this->assertNull($house->fresh()->listing_archived_at);
+        $ownerHouses = $this->actingAs($owner)
+            ->getJson('/api/owner/houses')
+            ->assertOk()
+            ->assertJsonCount(1, 'houses');
+        $requestedHouse = collect($ownerHouses->json('houses'))->firstWhere('id', $house->id);
+        $this->assertIsString($requestedHouse['owner_deletion_requested_at']);
+
+        $this->actingAs($owner)
+            ->postJson('/api/owner/houses/'.$house->id.'/deletion-request')
+            ->assertStatus(409);
+        $this->actingAs($owner)
+            ->putJson('/api/owner/houses/'.$house->id, $this->houseData())
+            ->assertStatus(409);
+
+        $this->postJson('/api/owner/houses/'.$otherRejectedHouse->id.'/deletion-request')->assertNotFound();
+        $this->deleteJson('/api/owner/houses/'.$house->id)->assertStatus(405);
+
+        $admin = User::factory()->create(['email' => 'delete-approval-admin@example.test']);
+        $admin->forceFill(['role' => 'admin'])->save();
+        $adminHouses = $this->actingAs($admin)
+            ->getJson('/api/admin/houses')
+            ->assertOk();
+        $adminHouse = collect($adminHouses->json('houses'))->firstWhere('id', $house->id);
+        $this->assertIsString($adminHouse['owner_deletion_requested_at']);
+        $this->actingAs($admin)
+            ->deleteJson('/api/admin/houses/'.$house->id)
+            ->assertOk()
+            ->assertJsonPath('house_id', $house->id);
+        $this->assertNull($house->fresh());
+    }
+
     public function test_invalid_house_fields_are_rejected(): void
     {
         $this->actingAs($this->owner())
@@ -147,6 +194,11 @@ class OwnerHouseManagementTest extends TestCase
             'available' => true,
             'verification_status' => 'pending_verification',
         ]);
+        $archivedHouse = $this->createHouse($owner, [
+            'available' => true,
+            'verification_status' => 'verified',
+        ]);
+        $archivedHouse->forceFill(['listing_archived_at' => now()])->save();
         $this->createHouse($owner, [
             'available' => false,
             'verification_status' => 'verified',
@@ -158,6 +210,15 @@ class OwnerHouseManagementTest extends TestCase
             'student_id' => $student->id,
             'house_id' => $availableHouse->id,
         ]);
+        RentalRequest::create([
+            'student_id' => $student->id,
+            'house_id' => $archivedHouse->id,
+        ]);
+
+        $this->actingAs($owner)
+            ->getJson('/api/owner/houses')
+            ->assertOk()
+            ->assertJsonCount(2, 'houses');
 
         $this->actingAs($owner)
             ->getJson('/api/owner/dashboard')

@@ -121,6 +121,43 @@ class MaintenanceRequestTest extends TestCase
         $this->actingAs($student)->getJson('/api/owner/maintenance-requests')->assertForbidden();
     }
 
+    public function test_owner_repair_reports_show_only_completed_repairs_for_their_houses(): void
+    {
+        $owner = $this->owner();
+        $otherOwner = $this->owner('other-reports-owner@example.test');
+        $house = $this->house($owner);
+        $otherHouse = $this->house($otherOwner);
+        $student = $this->student();
+
+        $completed = $this->createMaintenanceRequest($student, $house, [
+            'status' => 'completed',
+            'repair_cost_tnd' => '85.500',
+            'repair_outcome' => 'Replaced the damaged pipe and tested the repair.',
+            'resolved_at' => now(),
+            'owner_confirmed_completed_at' => now(),
+        ]);
+        $this->createMaintenanceRequest($student, $house, [
+            'status' => 'awaiting_confirmation',
+            'repair_outcome' => 'Repair is awaiting owner confirmation.',
+            'resolved_at' => now(),
+        ]);
+        $this->createMaintenanceRequest($student, $otherHouse, [
+            'status' => 'completed',
+            'repair_outcome' => 'Private report for another owner.',
+            'resolved_at' => now(),
+        ]);
+
+        $this->actingAs($owner)->getJson('/api/owner/repair-reports')
+            ->assertOk()
+            ->assertJsonCount(1, 'repair_reports.data')
+            ->assertJsonPath('repair_reports.data.0.id', $completed->id)
+            ->assertJsonPath('repair_reports.data.0.status', 'completed')
+            ->assertJsonPath('repair_reports.data.0.repair_cost_tnd', '85.500')
+            ->assertJsonPath('repair_reports.data.0.repair_outcome', 'Replaced the damaged pipe and tested the repair.');
+
+        $this->actingAs($student)->getJson('/api/owner/repair-reports')->assertForbidden();
+    }
+
     public function test_only_governorate_authorized_admin_can_assign_workers_and_worker_is_notified(): void
     {
         $owner = $this->owner();

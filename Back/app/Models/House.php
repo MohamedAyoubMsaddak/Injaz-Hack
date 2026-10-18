@@ -32,6 +32,8 @@ class House extends Model
             'negotiation_last_contact_at' => 'datetime',
             'submission_reviewed_at' => 'datetime',
             'price_agreed_at' => 'datetime',
+            'listing_archived_at' => 'datetime',
+            'owner_deletion_requested_at' => 'datetime',
             'available' => 'boolean',
             'verification_decided_at' => 'datetime',
         ];
@@ -50,6 +52,11 @@ class House extends Model
     public function inspectionReports(): HasMany
     {
         return $this->hasMany(InspectionReport::class);
+    }
+
+    public function studentCheckRequests(): HasMany
+    {
+        return $this->hasMany(InspectionReport::class, 'house_id');
     }
 
     public function verificationDecisionMaker(): BelongsTo

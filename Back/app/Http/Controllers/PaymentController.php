@@ -25,7 +25,10 @@ class PaymentController extends Controller
             ->latest('requested_at')
             ->get()
             ->flatMap(fn (RentalRequest $rental) => $rental->payments
-                ->where('payment_type', Payment::TYPE_STUDENT_SERVICE_FEE)
+                ->whereIn('payment_type', [
+                    Payment::TYPE_STUDENT_SERVICE_FEE,
+                    Payment::TYPE_STUDENT_RENT_AND_SERVICE_FEE,
+                ])
                 ->map(fn (Payment $payment) => $this->paymentData($payment, $rental)));
 
         return response()->json([

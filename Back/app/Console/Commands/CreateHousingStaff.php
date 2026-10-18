@@ -4,12 +4,15 @@ namespace App\Console\Commands;
 
 use App\Models\User;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 
 class CreateHousingStaff extends Command
 {
+    private const MAX_WORKERS = 6;
+
     protected $signature = 'housing:create-staff {role : Staff role: admin or worker}';
 
     protected $description = 'Create an authorized housing administrator or governorate worker';
@@ -19,6 +22,12 @@ class CreateHousingStaff extends Command
         $role = $this->argument('role');
         if (! in_array($role, ['admin', 'worker'], true)) {
             $this->error('Role must be admin or worker.');
+
+            return self::FAILURE;
+        }
+
+        if ($role === 'worker' && User::query()->where('role', 'worker')->count() >= self::MAX_WORKERS) {
+            $this->error('The maximum of six worker accounts has already been reached.');
 
             return self::FAILURE;
         }
@@ -52,16 +61,38 @@ class CreateHousingStaff extends Command
             return self::FAILURE;
         }
 
-        $user = User::create([
-            'name' => $attributes['name'],
-            'email' => $attributes['email'],
-            'phone' => $attributes['phone'],
-            'password' => Hash::make($password),
-        ]);
-        $user->forceFill([
-            'role' => $role,
-            'governorate' => $attributes['governorate'],
-        ])->save();
+        $user = DB::transaction(function () use ($role, $attributes, $password): ?User {
+            if ($role === 'worker') {
+                $workerIds = User::query()
+                    ->where('role', 'worker')
+                    ->orderBy('id')
+                    ->lockForUpdate()
+                    ->pluck('id');
+
+                if ($workerIds->count() >= self::MAX_WORKERS) {
+                    return null;
+                }
+            }
+
+            $user = User::create([
+                'name' => $attributes['name'],
+                'email' => $attributes['email'],
+                'phone' => $attributes['phone'],
+                'password' => Hash::make($password),
+            ]);
+            $user->forceFill([
+                'role' => $role,
+                'governorate' => $attributes['governorate'],
+            ])->save();
+
+            return $user;
+        });
+
+        if ($user === null) {
+            $this->error('The maximum of six worker accounts has already been reached.');
+
+            return self::FAILURE;
+        }
 
         $this->info(ucfirst($role).' account created for '.$user->email.'. The password was not displayed.');
 

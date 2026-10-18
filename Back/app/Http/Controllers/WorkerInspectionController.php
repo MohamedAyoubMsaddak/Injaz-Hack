@@ -132,7 +132,9 @@ class WorkerInspectionController extends Controller
                     ]);
                 }
 
-                $lockedReport->house()->update(['verification_status' => 'inspection_completed']);
+                if ($lockedReport->requested_by_student_id === null) {
+                    $lockedReport->house()->update(['verification_status' => 'inspection_completed']);
+                }
 
                 return $lockedReport->load(['house.owner', 'photos']);
             });

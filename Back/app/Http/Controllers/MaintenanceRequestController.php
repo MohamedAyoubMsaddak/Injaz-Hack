@@ -136,6 +136,27 @@ class MaintenanceRequestController extends Controller
         return response()->json(['maintenance_requests' => $requests]);
     }
 
+    public function ownerRepairReports(Request $request): JsonResponse
+    {
+        $reports = MaintenanceRequest::query()
+            ->where('status', 'completed')
+            ->whereHas('house', fn ($query) => $query->where('owner_id', $request->user()->id))
+            ->with([
+                'house:id,title,city,governorate,owner_id',
+                'reporter:id,name,email,phone',
+                'assignedWorker:id,name,governorate',
+                'photos',
+                'updates.actor:id,name',
+                'visits.worker:id,name',
+            ])
+            ->latest('resolved_at')
+            ->paginate(15);
+
+        $reports->through(fn (MaintenanceRequest $item) => $this->requestData($item, 'owner'));
+
+        return response()->json(['repair_reports' => $reports]);
+    }
+
     public function ownerAcknowledge(Request $request, int $maintenanceRequest): JsonResponse
     {
         $item = DB::transaction(function () use ($request, $maintenanceRequest): MaintenanceRequest {

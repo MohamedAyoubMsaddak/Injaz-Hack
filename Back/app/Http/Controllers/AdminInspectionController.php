@@ -17,14 +17,16 @@ class AdminInspectionController extends Controller
     public function pendingReviews(): JsonResponse
     {
         $reports = InspectionReport::query()
-            ->with(['house.owner', 'worker', 'photos'])
+            ->with(['house.owner', 'worker', 'photos', 'requestedByStudent'])
             ->where('status', 'completed')
             ->whereNull('reviewed_at')
-            ->whereHas('house', fn ($query) => $query
-                ->where('verification_status', 'inspection_completed')
-                ->where(fn ($negotiation) => $negotiation
-                    ->whereNull('negotiation_status')
-                    ->orWhere('negotiation_status', 'price_agreed')))
+            ->where(fn ($query) => $query
+                ->whereNotNull('requested_by_student_id')
+                ->orWhereHas('house', fn ($house) => $house
+                    ->where('verification_status', 'inspection_completed')
+                    ->where(fn ($negotiation) => $negotiation
+                        ->whereNull('negotiation_status')
+                        ->orWhere('negotiation_status', 'price_agreed'))))
             ->orderBy('completed_at')
             ->get();
 
@@ -33,13 +35,41 @@ class AdminInspectionController extends Controller
         ]);
     }
 
+    public function studentRequests(): JsonResponse
+    {
+        $reports = InspectionReport::query()
+            ->with(['house.owner', 'requestedByStudent'])
+            ->whereNotNull('requested_by_student_id')
+            ->where('status', 'requested')
+            ->orderBy('created_at')
+            ->get();
+
+        return response()->json([
+            'requests' => $reports->map(fn (InspectionReport $report) => [
+                'id' => $report->id,
+                'rental_request_id' => $report->rental_request_id,
+                'requested_at' => $report->created_at?->toIso8601String(),
+                'student' => $report->requestedByStudent?->only(['name', 'email', 'phone']),
+                'house' => [
+                    'id' => $report->house->id,
+                    'title' => $report->house->title,
+                    'city' => $report->house->city,
+                    'governorate' => $report->house->governorate,
+                    'address' => $report->house->address,
+                ],
+            ]),
+        ]);
+    }
+
     public function reviewPhoto(int $inspection, int $photo): StreamedResponse
     {
         $report = InspectionReport::query()
             ->whereKey($inspection)
             ->where('status', 'completed')
-            ->whereHas('house', fn ($query) => $query
-                ->where('verification_status', 'inspection_completed'))
+            ->where(fn ($query) => $query
+                ->whereNotNull('requested_by_student_id')
+                ->orWhereHas('house', fn ($house) => $house
+                    ->where('verification_status', 'inspection_completed')))
             ->firstOrFail();
         $inspectionPhoto = $report->photos()->whereKey($photo)->firstOrFail();
 
@@ -104,17 +134,68 @@ class AdminInspectionController extends Controller
         ], 201);
     }
 
+    public function assignStudentRequest(Request $request, int $inspection): JsonResponse
+    {
+        $validated = $request->validate([
+            'worker_id' => ['required', 'integer', Rule::exists('users', 'id')->where('role', 'worker')],
+            'scheduled_at' => ['required', 'date', 'after_or_equal:today'],
+        ]);
+
+        $report = DB::transaction(function () use ($inspection, $validated): InspectionReport {
+            $report = InspectionReport::query()->whereKey($inspection)->lockForUpdate()->firstOrFail();
+            abort_unless($report->requested_by_student_id !== null, 404);
+            abort_unless($report->status === 'requested', 409, 'This student inspection request is no longer awaiting assignment.');
+            $house = House::query()->whereKey($report->house_id)->firstOrFail();
+            $worker = User::query()->whereKey($validated['worker_id'])
+                ->where('role', 'worker')
+                ->firstOrFail();
+
+            abort_unless($worker->governorate && $worker->governorate === $house->governorate, 422, 'The worker is not assigned to this house governorate.');
+
+            $report->update([
+                'worker_id' => $worker->id,
+                'inspection_date' => $validated['scheduled_at'],
+                'status' => 'assigned',
+            ]);
+
+            return $report;
+        });
+
+        return response()->json([
+            'inspection_id' => $report->id,
+            'status' => $report->status,
+            'message' => 'Inspection assigned to the governorate worker.',
+        ]);
+    }
+
     public function decide(Request $request, int $inspection): JsonResponse
     {
         $validated = $request->validate([
-            'decision' => ['required', Rule::in(['verified', 'rejected', 'corrections_required'])],
+            'decision' => ['required', Rule::in(['verified', 'rejected', 'corrections_required', 'report_shared'])],
             'review_notes' => ['nullable', 'string', 'max:10000'],
         ]);
 
-        $house = DB::transaction(function () use ($request, $inspection, $validated): House {
+        $report = DB::transaction(function () use ($request, $inspection, $validated): InspectionReport {
             $report = InspectionReport::query()->whereKey($inspection)->lockForUpdate()->firstOrFail();
             abort_unless($report->status === 'completed', 409, 'Only completed inspections can be reviewed.');
             abort_if($report->reviewed_at !== null, 409, 'This inspection already has a final decision.');
+            $studentRequested = $report->requested_by_student_id !== null;
+            abort_unless(
+                $studentRequested === ($validated['decision'] === 'report_shared'),
+                422,
+                'The selected decision does not match this inspection type.'
+            );
+
+            if ($studentRequested) {
+                $report->update([
+                    'reviewed_by' => $request->user()->id,
+                    'reviewed_at' => now(),
+                    'review_notes' => $validated['review_notes'] ?? null,
+                ]);
+
+                return $report->load(['house.owner', 'worker', 'photos', 'requestedByStudent']);
+            }
+
             abort_unless(
                 $validated['decision'] !== 'verified' || $report->recommendation === 'approve',
                 422,
@@ -140,13 +221,15 @@ class AdminInspectionController extends Controller
                 'verification_decided_at' => now(),
             ])->save();
 
-            return $house;
+            return $report->load(['house.owner', 'worker', 'photos']);
         });
 
         return response()->json([
-            'house_id' => $house->id,
-            'verification_status' => $house->verification_status,
-            'message' => 'Final verification decision recorded.',
+            'house_id' => $report->house_id,
+            'verification_status' => $report->house->verification_status,
+            'message' => $report->requested_by_student_id
+                ? 'Inspection report shared with the requesting student.'
+                : 'Final verification decision recorded.',
         ]);
     }
 
@@ -154,6 +237,7 @@ class AdminInspectionController extends Controller
     {
         return [
             'id' => $report->id,
+            'rental_request_id' => $report->rental_request_id,
             'completed_at' => $report->completed_at?->toIso8601String(),
             'condition_checklist' => $report->condition_checklist,
             'notes' => $report->notes,
@@ -169,6 +253,7 @@ class AdminInspectionController extends Controller
             ],
             'owner' => $report->house->owner?->only(['name', 'email', 'phone']),
             'worker' => $report->worker?->only(['name', 'email']),
+            'student' => $report->requestedByStudent?->only(['name', 'email', 'phone']),
             'photos' => $report->photos->map(fn ($photo) => [
                 'id' => $photo->id,
                 'url' => route('admin.inspections.photos.show', [

@@ -4,10 +4,12 @@ namespace Tests\Feature;
 
 use App\Models\House;
 use App\Models\InspectionReport;
+use App\Models\MaintenanceNotification;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class HousePriceNegotiationTest extends TestCase
@@ -419,6 +421,178 @@ class HousePriceNegotiationTest extends TestCase
 
         $this->assertNull($house->fresh()->public_listing_price_tnd);
         $this->assertSame('pending_negotiation', $house->fresh()->verification_status);
+    }
+
+    public function test_admin_can_browse_and_edit_listing_details_without_changing_price_or_review_status(): void
+    {
+        $owner = $this->user('owner', 'all-houses-owner@example.test');
+        $admin = $this->user('admin', 'all-houses-admin@example.test');
+        $student = $this->user('student', 'all-houses-student@example.test');
+        $house = $this->pendingHouse($owner, '400.000');
+        $house->forceFill([
+            'verification_status' => 'verified',
+            'negotiation_status' => 'owner_accepted',
+            'public_listing_price_tnd' => '400.000',
+            'available' => true,
+        ])->save();
+
+        $this->actingAs($student)->getJson('/api/admin/houses')->assertForbidden();
+        $this->actingAs($owner)->putJson('/api/admin/houses/'.$house->id, [
+            ...$this->houseData(),
+            'title' => 'Unauthorized edit',
+        ])->assertForbidden();
+
+        $this->actingAs($admin)->getJson('/api/admin/houses')
+            ->assertOk()
+            ->assertJsonCount(1, 'houses')
+            ->assertJsonPath('houses.0.id', $house->id)
+            ->assertJsonPath('houses.0.owner.email', $owner->email)
+            ->assertJsonPath('houses.0.public_listing_price_tnd', '400.000');
+
+        $this->actingAs($admin)->putJson('/api/admin/houses/'.$house->id, [
+            ...$this->houseData(),
+            'title' => 'Updated student home',
+            'city' => 'Sousse',
+            'monthly_rent_tnd' => '1.000',
+            'public_listing_price_tnd' => '1.000',
+            'verification_status' => 'rejected',
+        ])->assertOk()
+            ->assertJsonPath('house.title', 'Updated student home')
+            ->assertJsonPath('house.city', 'Sousse')
+            ->assertJsonPath('house.monthly_rent_tnd', '400.000')
+            ->assertJsonPath('house.public_listing_price_tnd', '400.000')
+            ->assertJsonPath('house.verification_status', 'verified');
+
+        $this->actingAs($admin)->putJson('/api/admin/houses/'.$house->id, [
+            ...$this->houseData(),
+            'bedrooms' => 0,
+        ])->assertUnprocessable()->assertJsonValidationErrors('bedrooms');
+    }
+
+    public function test_admin_permanently_deletes_a_listing_and_all_related_history(): void
+    {
+        $owner = $this->user('owner', 'remove-listing-owner@example.test');
+        $admin = $this->user('admin', 'remove-listing-admin@example.test');
+        $student = $this->user('student', 'remove-listing-student@example.test');
+        $worker = $this->user('worker', 'remove-listing-worker@example.test', ['governorate' => 'Tunis']);
+        $houseId = $this->actingAs($owner)->post('/api/owner/houses', $this->submissionData())
+            ->assertCreated()
+            ->json('house.id');
+        $house = House::query()->findOrFail($houseId);
+
+        $this->actingAs($admin)->postJson('/api/admin/houses/'.$houseId.'/submission-decision', [
+            'decision' => 'owner_accepted',
+        ])->assertOk();
+        $rental = $student->rentalRequestsAsStudent()->create([
+            'house_id' => $houseId,
+            'requested_at' => now(),
+            'status' => 'accepted',
+            'secured_house' => false,
+            'service_fee_tnd' => '20.000',
+            'service_fee_payment_status' => 'not_due',
+        ]);
+        $rental->payments()->create([
+            'payment_reference' => (string) Str::uuid(),
+            'payer_id' => $student->id,
+            'payment_type' => 'student_service_fee',
+            'amount_tnd' => '20.000',
+            'currency' => 'TND',
+            'status' => 'pending',
+        ]);
+        $inspection = $house->inspectionReports()->create([
+            'worker_id' => $worker->id,
+            'inspection_date' => now(),
+            'status' => 'assigned',
+        ]);
+        $inspectionPhotoPath = 'inspections/'.$inspection->id.'/evidence.png';
+        Storage::disk(config('filesystems.default'))->put($inspectionPhotoPath, 'inspection evidence');
+        $inspection->photos()->create([
+            'disk' => config('filesystems.default'),
+            'path' => $inspectionPhotoPath,
+        ]);
+        $maintenanceRequest = $house->maintenanceRequests()->create([
+            'reporter_id' => $student->id,
+            'description' => 'Test maintenance record.',
+        ]);
+        $maintenancePhotoPath = 'maintenance/'.$maintenanceRequest->id.'/evidence.png';
+        Storage::disk(config('filesystems.default'))->put($maintenancePhotoPath, 'maintenance evidence');
+        $maintenanceRequest->photos()->create([
+            'disk' => config('filesystems.default'),
+            'path' => $maintenancePhotoPath,
+        ]);
+        $maintenanceRequest->updates()->create([
+            'actor_id' => $student->id,
+            'event_type' => 'reported',
+            'body' => 'Test update.',
+            'created_at' => now(),
+        ]);
+        $maintenanceRequest->visits()->create([
+            'worker_id' => $worker->id,
+            'scheduled_at' => now(),
+        ]);
+        MaintenanceNotification::query()->create([
+            'maintenance_request_id' => $maintenanceRequest->id,
+            'recipient_id' => $student->id,
+            'event_type' => 'reported',
+            'message' => 'Test notification.',
+        ]);
+        $housePhotoPaths = $house->photos()->pluck('path')->all();
+        $this->actingAs($student)->getJson('/api/student/houses')
+            ->assertOk()
+            ->assertJsonCount(1, 'houses.data');
+        $this->assertDatabaseCount('owner_subscriptions', 1);
+        $this->assertDatabaseCount('payments', 2);
+
+        $this->actingAs($student)->deleteJson('/api/admin/houses/'.$houseId)->assertForbidden();
+        $this->actingAs($admin)->deleteJson('/api/admin/houses/'.$houseId)
+            ->assertOk()
+            ->assertJsonPath('house_id', $houseId)
+            ->assertJsonPath('message', 'The house and all related rental, payment, inspection, and maintenance records were permanently deleted.');
+
+        $this->actingAs($student)->getJson('/api/student/houses')
+            ->assertOk()
+            ->assertJsonCount(0, 'houses.data');
+        $this->actingAs($admin)->getJson('/api/admin/houses')
+            ->assertOk()
+            ->assertJsonCount(0, 'houses');
+        $this->actingAs($owner)->getJson('/api/owner/houses')
+            ->assertOk()
+            ->assertJsonCount(0, 'houses');
+        $this->assertDatabaseMissing('houses', ['id' => $houseId]);
+        $this->assertDatabaseCount('house_photos', 0);
+        $this->assertDatabaseCount('owner_subscriptions', 0);
+        $this->assertDatabaseCount('payments', 0);
+        $this->assertDatabaseCount('rental_requests', 0);
+        $this->assertDatabaseCount('inspection_reports', 0);
+        $this->assertDatabaseCount('inspection_report_photos', 0);
+        $this->assertDatabaseCount('maintenance_requests', 0);
+        $this->assertDatabaseCount('maintenance_request_photos', 0);
+        $this->assertDatabaseCount('maintenance_request_updates', 0);
+        $this->assertDatabaseCount('maintenance_visits', 0);
+        $this->assertDatabaseCount('maintenance_notifications', 0);
+        foreach ([...$housePhotoPaths, $inspectionPhotoPath, $maintenancePhotoPath] as $path) {
+            Storage::disk(config('filesystems.default'))->assertMissing($path);
+        }
+
+        $this->actingAs($admin)->deleteJson('/api/admin/houses/'.$houseId)->assertNotFound();
+    }
+
+    public function test_admin_can_remove_a_house_post_before_it_is_published(): void
+    {
+        $owner = $this->user('owner', 'pending-post-owner@example.test');
+        $admin = $this->user('admin', 'pending-post-admin@example.test');
+        $house = $this->pendingHouse($owner, '400.000', 'Pending owner post', 'pending');
+
+        $this->actingAs($admin)->getJson('/api/admin/houses')
+            ->assertOk()
+            ->assertJsonPath('houses.0.id', $house->id)
+            ->assertJsonPath('houses.0.verification_status', 'pending_negotiation');
+
+        $this->actingAs($admin)->deleteJson('/api/admin/houses/'.$house->id)
+            ->assertOk()
+            ->assertJsonPath('house_id', $house->id);
+
+        $this->assertDatabaseMissing('houses', ['id' => $house->id]);
     }
 
     private function pendingHouse(

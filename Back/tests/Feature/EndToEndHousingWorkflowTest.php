@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Models\House;
 use App\Models\MaintenanceRequest;
 use App\Models\Payment;
+use App\Models\RentalRequest;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -107,17 +108,42 @@ class EndToEndHousingWorkflowTest extends TestCase
         $rentalResponse = $this->postJson('/api/student/rental-requests', ['house_id' => $house->id]);
         $rentalResponse->assertCreated()
             ->assertJsonPath('rental_request.status', 'pending')
-            ->assertJsonPath('rental_request.service_fee_payment_status', 'not_due');
+            ->assertJsonPath('rental_request.service_fee_payment_status', 'not_due')
+            ->assertJsonPath('payment_obligation.amount', '520.000')
+            ->assertJsonPath('payment_obligation.rent_amount', '500.000')
+            ->assertJsonPath('payment_obligation.service_fee_amount', '20.000')
+            ->assertJsonPath('checkout_available', false);
         $rentalId = $rentalResponse->json('rental_request.id');
+        RentalRequest::query()->findOrFail($rentalId)->conditionReport()->update([
+            'status' => 'completed',
+            'completed_at' => now(),
+            'reviewed_by' => $admin->id,
+            'reviewed_at' => now(),
+            'condition_checklist' => ['electricity' => 'good'],
+            'notes' => 'Admin-reviewed rental inspection report.',
+        ]);
         $this->assertSame(0, Payment::where('payment_type', Payment::TYPE_STUDENT_SERVICE_FEE)->count());
 
         $secondStudent = $this->createRoleUser('student', 'second-student@example.test');
         $secondRental = $this->actingAs($secondStudent)->postJson('/api/student/rental-requests', [
             'house_id' => $house->id,
         ])->assertCreated()->json('rental_request.id');
+        RentalRequest::query()->findOrFail($secondRental)->conditionReport()->update([
+            'status' => 'completed',
+            'completed_at' => now(),
+            'reviewed_by' => $admin->id,
+            'reviewed_at' => now(),
+            'condition_checklist' => ['electricity' => 'good'],
+            'notes' => 'Admin-reviewed rental inspection report.',
+        ]);
         $this->actingAs($owner)->postJson('/api/owner/rental-requests/'.$secondRental.'/decision', [
             'decision' => 'rejected',
         ])->assertOk()->assertJsonPath('rental_request.status', 'rejected');
+        $this->assertDatabaseHas('payments', [
+            'rental_request_id' => $secondRental,
+            'payment_type' => Payment::TYPE_STUDENT_RENT_AND_SERVICE_FEE,
+            'status' => Payment::STATUS_CANCELLED,
+        ]);
 
         $this->actingAs($owner)->postJson('/api/owner/rental-requests/'.$rentalId.'/decision', [
             'decision' => 'accepted',
@@ -133,8 +159,8 @@ class EndToEndHousingWorkflowTest extends TestCase
         $this->assertDatabaseHas('payments', [
             'payer_id' => $student->id,
             'rental_request_id' => $rentalId,
-            'payment_type' => Payment::TYPE_STUDENT_SERVICE_FEE,
-            'amount_tnd' => '20.000',
+            'payment_type' => Payment::TYPE_STUDENT_RENT_AND_SERVICE_FEE,
+            'amount_tnd' => '520.000',
             'currency' => 'TND',
             'status' => Payment::STATUS_PENDING,
         ]);

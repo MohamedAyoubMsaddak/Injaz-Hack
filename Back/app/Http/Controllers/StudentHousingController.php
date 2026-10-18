@@ -4,9 +4,13 @@ namespace App\Http\Controllers;
 
 use App\Models\House;
 use App\Models\HousePhoto;
+use App\Models\InspectionReport;
+use App\Models\InspectionReportPhoto;
+use App\Models\Payment;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Symfony\Component\HttpFoundation\StreamedResponse;
@@ -30,11 +34,19 @@ class StudentHousingController extends Controller
             'student_service_fee_tnd' => config('student_housing.student_service_fee_tnd'),
             'recent_houses' => $this->verifiedHouses()
                 ->where('available', true)
-                ->with(['owner:id,name', 'photos', 'inspectionReports' => $this->approvedInspectionReports()])
+                ->with([
+                    'owner:id,name',
+                    'photos',
+                    'inspectionReports' => $this->approvedInspectionReports(),
+                    'studentCheckRequests' => fn ($query) => $query
+                        ->where('requested_by_student_id', $student->id)
+                        ->whereNull('rental_request_id')
+                        ->latest(),
+                ])
                 ->latest()
                 ->limit(6)
                 ->get()
-                ->map(fn (House $house) => $this->houseData($house)),
+                ->map(fn (House $house) => $this->houseData($house, $student->id)),
             'active_requests' => $rentalRequests
                 ->whereIn('status', ['pending', 'accepted'])
                 ->values()
@@ -63,7 +75,22 @@ class StudentHousingController extends Controller
         ]);
 
         $houses = $this->verifiedHouses()
-            ->with(['owner:id,name', 'photos', 'inspectionReports' => $this->approvedInspectionReports()])
+            ->with([
+                'owner:id,name',
+                'photos',
+                'inspectionReports' => $this->approvedInspectionReports(),
+                'studentCheckRequests' => fn ($query) => $query
+                    ->where('requested_by_student_id', $request->user()->id)
+                    ->whereNull('rental_request_id')
+                    ->latest(),
+                'rentalRequests' => fn ($query) => $query
+                    ->where('student_id', $request->user()->id)
+                    ->where(fn (Builder $active) => $active
+                        ->whereIn('status', ['pending', 'accepted'])
+                        ->orWhere('secured_house', true))
+                    ->with('payments')
+                    ->latest('requested_at'),
+            ])
             ->when(filled($validated['governorate'] ?? null), fn (Builder $query) => $query->where('governorate', $validated['governorate']))
             ->when(filled($validated['city'] ?? null), fn (Builder $query) => $query->where('city', $validated['city']))
             ->when(isset($validated['max_rent']), fn (Builder $query) => $query->where('public_listing_price_tnd', '<=', $validated['max_rent']))
@@ -74,19 +101,90 @@ class StudentHousingController extends Controller
             ->paginate(12)
             ->withQueryString();
 
-        $houses->through(fn (House $house) => $this->houseData($house));
+        $houses->through(fn (House $house) => $this->houseData($house, $request->user()->id));
 
-        return response()->json(['houses' => $houses]);
+        return response()->json([
+            'houses' => $houses,
+            'student_service_fee_tnd' => config('student_housing.student_service_fee_tnd'),
+        ]);
     }
 
-    public function show(int $house): JsonResponse
+    public function show(Request $request, int $house): JsonResponse
     {
         $property = $this->verifiedHouses()
-            ->with(['owner:id,name', 'photos', 'inspectionReports' => $this->approvedInspectionReports()])
+            ->with([
+                'owner:id,name',
+                'photos',
+                'inspectionReports' => $this->approvedInspectionReports(),
+                'studentCheckRequests' => fn ($query) => $query
+                    ->where('requested_by_student_id', $request->user()->id)
+                    ->whereNull('rental_request_id')
+                    ->latest(),
+                'rentalRequests' => fn ($query) => $query
+                    ->where('student_id', $request->user()->id)
+                    ->where(fn (Builder $active) => $active
+                        ->whereIn('status', ['pending', 'accepted'])
+                        ->orWhere('secured_house', true))
+                    ->with('payments')
+                    ->latest('requested_at'),
+            ])
             ->whereKey($house)
             ->firstOrFail();
 
-        return response()->json(['house' => $this->houseData($property)]);
+        return response()->json(['house' => $this->houseData($property, $request->user()->id)]);
+    }
+
+    public function requestCheck(Request $request, int $house): JsonResponse
+    {
+        $student = $request->user();
+        $inspection = DB::transaction(function () use ($student, $house): InspectionReport {
+            $property = $this->verifiedHouses()->whereKey($house)->lockForUpdate()->firstOrFail();
+            $activeRequest = $property->inspectionReports()
+                ->where('requested_by_student_id', $student->id)
+                ->where(function (Builder $query) {
+                    $query->whereIn('status', ['requested', 'assigned'])
+                        ->orWhere(fn (Builder $completed) => $completed
+                            ->where('status', 'completed')
+                            ->whereNull('reviewed_at'));
+                })
+                ->exists();
+
+            abort_if($activeRequest, 409, 'You already have an inspection request in progress for this house.');
+
+            return $property->inspectionReports()->create([
+                'requested_by_student_id' => $student->id,
+                'inspection_date' => now(),
+                'status' => 'requested',
+            ]);
+        });
+
+        return response()->json([
+            'check_request' => $this->checkRequestData($inspection),
+            'message' => 'Your inspection request was sent to the company.',
+        ], 201);
+    }
+
+    public function checkRequests(Request $request): JsonResponse
+    {
+        $requests = $request->user()->inspectionReportsAsStudent()
+            ->whereNull('rental_request_id')
+            ->with(['house', 'photos'])
+            ->latest()
+            ->get()
+            ->map(fn (InspectionReport $report) => [
+                ...$this->checkRequestData($report),
+                'house' => [
+                    'id' => $report->house->id,
+                    'title' => $report->house->title,
+                    'city' => $report->house->city,
+                    'governorate' => $report->house->governorate,
+                    'address' => $report->house->address,
+                    'monthly_rent_tnd' => $report->house->public_listing_price_tnd,
+                ],
+                'requested_at' => $report->created_at?->toIso8601String(),
+            ]);
+
+        return response()->json(['check_requests' => $requests]);
     }
 
     public function photo(int $house, int $photo): StreamedResponse
@@ -101,9 +199,25 @@ class StudentHousingController extends Controller
         );
     }
 
+    public function checkPhoto(Request $request, int $inspection, int $photo): StreamedResponse
+    {
+        $report = $request->user()->inspectionReportsAsStudent()
+            ->whereKey($inspection)
+            ->whereNotNull('reviewed_at')
+            ->firstOrFail();
+        $inspectionPhoto = $report->photos()->whereKey($photo)->firstOrFail();
+
+        return Storage::disk($inspectionPhoto->disk)->response(
+            $inspectionPhoto->path,
+            null,
+            ['X-Content-Type-Options' => 'nosniff']
+        );
+    }
+
     public function verifiedHouses(): Builder
     {
         return House::query()
+            ->whereNull('listing_archived_at')
             ->where('available', true)
             ->where('verification_status', 'verified')
             ->whereNotNull('public_listing_price_tnd')
@@ -129,6 +243,7 @@ class StudentHousingController extends Controller
     private function approvedInspectionReports(): \Closure
     {
         return fn ($query) => $query
+            ->whereNull('requested_by_student_id')
             ->where('status', 'completed')
             ->where('recommendation', 'approve')
             ->whereNotNull('completed_at')
@@ -139,9 +254,15 @@ class StudentHousingController extends Controller
             ->orderByDesc('inspection_date');
     }
 
-    private function houseData(House $house): array
+    private function houseData(House $house, ?int $studentId = null): array
     {
         $inspection = $house->inspectionReports->first();
+        $checkRequest = $studentId && $house->relationLoaded('studentCheckRequests')
+            ? $house->studentCheckRequests->first()
+            : null;
+        $rentalRequest = $studentId && $house->relationLoaded('rentalRequests')
+            ? $house->rentalRequests->first()
+            : null;
 
         return [
             'id' => $house->id,
@@ -168,12 +289,47 @@ class StudentHousingController extends Controller
                 'checklist' => $inspection->condition_checklist,
                 'defects_found' => $inspection->defects_found,
             ] : null,
+            'check_request' => $checkRequest ? $this->checkRequestData($checkRequest) : null,
+            'rental_request' => $rentalRequest ? $this->rentalRequestData($rentalRequest) : null,
             'created_at' => $house->created_at,
         ];
     }
 
+    private function checkRequestData(InspectionReport $report): array
+    {
+        $data = [
+            'id' => $report->id,
+            'status' => $report->status,
+            'scheduled_at' => $report->status === 'assigned' ? $report->inspection_date?->toIso8601String() : null,
+            'shared_at' => $report->reviewed_at?->toIso8601String(),
+        ];
+
+        if ($report->reviewed_at) {
+            $data['report'] = [
+                'completed_at' => $report->completed_at?->toIso8601String(),
+                'checklist' => $report->condition_checklist,
+                'notes' => $report->notes,
+                'defects_found' => $report->defects_found,
+                'recommendation' => $report->recommendation,
+                'review_notes' => $report->review_notes,
+                'photos' => $report->photos->map(fn (InspectionReportPhoto $photo) => [
+                    'id' => $photo->id,
+                    'url' => route('student.house-check-requests.photos.show', [
+                        'inspection' => $report->id,
+                        'photo' => $photo->id,
+                    ]),
+                    'caption' => $photo->caption,
+                ])->values(),
+            ];
+        }
+
+        return $data;
+    }
+
     private function rentalRequestData($rentalRequest): array
     {
+        $payment = $rentalRequest->payments->first();
+
         return [
             'id' => $rentalRequest->id,
             'status' => $rentalRequest->status,
@@ -183,6 +339,20 @@ class StudentHousingController extends Controller
             'owner_confirmed_secured' => $rentalRequest->owner_confirmed_secured_at !== null,
             'service_fee_tnd' => $rentalRequest->service_fee_tnd,
             'service_fee_payment_status' => $rentalRequest->service_fee_payment_status,
+            'payment_obligation' => $payment ? [
+                'id' => $payment->id,
+                'amount' => $payment->amount_tnd,
+                'rent_amount' => $payment->payment_type === Payment::TYPE_STUDENT_RENT_AND_SERVICE_FEE
+                    ? $rentalRequest->house?->public_listing_price_tnd
+                    : null,
+                'service_fee_amount' => $payment->payment_type === Payment::TYPE_STUDENT_RENT_AND_SERVICE_FEE
+                    ? $rentalRequest->service_fee_tnd
+                    : null,
+                'currency' => $payment->currency,
+                'status' => $payment->status,
+                'type' => $payment->payment_type,
+                'checkout_available' => false,
+            ] : null,
             'house' => $rentalRequest->house ? [
                 'id' => $rentalRequest->house->id,
                 'title' => $rentalRequest->house->title,

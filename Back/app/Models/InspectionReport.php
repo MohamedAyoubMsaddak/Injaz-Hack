@@ -11,6 +11,8 @@ class InspectionReport extends Model
     protected $fillable = [
         'house_id',
         'worker_id',
+        'requested_by_student_id',
+        'rental_request_id',
         'inspection_date',
         'condition_checklist',
         'defects_found',
@@ -20,6 +22,7 @@ class InspectionReport extends Model
         'completed_at',
         'reviewed_by',
         'reviewed_at',
+        'owner_read_at',
         'review_notes',
     ];
 
@@ -30,6 +33,7 @@ class InspectionReport extends Model
             'condition_checklist' => 'array',
             'completed_at' => 'datetime',
             'reviewed_at' => 'datetime',
+            'owner_read_at' => 'datetime',
         ];
     }
 
@@ -41,6 +45,16 @@ class InspectionReport extends Model
     public function worker(): BelongsTo
     {
         return $this->belongsTo(User::class, 'worker_id');
+    }
+
+    public function requestedByStudent(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by_student_id');
+    }
+
+    public function rentalRequest(): BelongsTo
+    {
+        return $this->belongsTo(RentalRequest::class);
     }
 
     public function reviewer(): BelongsTo

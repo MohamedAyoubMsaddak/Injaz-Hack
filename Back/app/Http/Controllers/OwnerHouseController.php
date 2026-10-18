@@ -20,6 +20,7 @@ class OwnerHouseController extends Controller
     public function index(Request $request): JsonResponse
     {
         $houses = $request->user()->houses()
+            ->whereNull('listing_archived_at')
             ->with('photos:id,house_id,disk,path,caption,sort_order')
             ->latest()
             ->get();
@@ -91,6 +92,7 @@ class OwnerHouseController extends Controller
     public function update(Request $request, int $house): JsonResponse
     {
         $ownedHouse = $this->ownedHouse($request, $house);
+        abort_if($ownedHouse->owner_deletion_requested_at !== null, 409, 'This house is awaiting administrator approval for removal.');
         $validated = $request->validate($this->rules($request, $ownedHouse));
         if (
             $ownedHouse->public_listing_price_tnd !== null
@@ -131,6 +133,25 @@ class OwnerHouseController extends Controller
             'house' => $this->houseData($ownedHouse),
             'message' => 'House details updated.',
         ]);
+    }
+
+    public function requestDeletion(Request $request, int $house): JsonResponse
+    {
+        $property = DB::transaction(function () use ($request, $house): House {
+            $property = $request->user()->houses()->whereKey($house)->lockForUpdate()->firstOrFail();
+            abort_if($property->listing_archived_at !== null, 409, 'This listing has already been removed.');
+            abort_if($property->owner_deletion_requested_at !== null, 409, 'A removal request for this house is already awaiting administrator approval.');
+
+            $property->forceFill(['owner_deletion_requested_at' => now()])->save();
+
+            return $property;
+        });
+
+        return response()->json([
+            'house_id' => $property->id,
+            'owner_deletion_requested_at' => $property->owner_deletion_requested_at?->toIso8601String(),
+            'message' => 'Your removal request was sent to the administrator. The house will remain listed until approved.',
+        ], 202);
     }
 
     public function photo(Request $request, int $house, int $photo): StreamedResponse
@@ -206,6 +227,8 @@ class OwnerHouseController extends Controller
             'furnishing_status' => $house->furnishing_status,
             'available' => $house->available,
             'verification_status' => $house->verification_status,
+            'listing_archived_at' => $house->listing_archived_at?->toIso8601String(),
+            'owner_deletion_requested_at' => $house->owner_deletion_requested_at?->toIso8601String(),
             'photos' => $house->photos->map(fn (HousePhoto $photo) => [
                 'id' => $photo->id,
                 'url' => route('owner.houses.photos.show', [

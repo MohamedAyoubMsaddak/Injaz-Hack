@@ -1,15 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { apiRequest, ApiError } from './api.js';
 import { getLanguage, setLanguage, t } from './i18n.js';
-
-const dashboardPath = (role) => {
-  if (role === 'student') return '/student/dashboard';
-  if (role === 'owner') return '/owner/dashboard';
-  if (role === 'worker') return '/worker/dashboard';
-  if (role === 'admin') return '/admin/price-negotiations';
-  return '/unsupported';
-};
+import AdminHousesPage from './features/admin/AdminHousesPage.jsx';
+import { EmptyState, RequestError } from './components/common/Feedback.jsx';
+import { dashboardPath } from './utils/navigation.js';
 
 function addTndAmounts(amount, margin) {
   const toMilliunits = (value) => {
@@ -60,7 +55,9 @@ function App() {
         <span className="header-note">{t("A place to feel at home")}</span>
         {user ?
         <div className="authenticated-header-actions">
-            <MaintenanceNotifications user={user} />
+            {user.role === 'owner'
+              ? <OwnerRentPaymentNotifications user={user} />
+              : (user.role === 'admin' || user.role === 'worker') && <MaintenanceNotifications user={user} />}
             <LanguageToggle language={language} onChange={changeLanguage} />
             <LogoutButton onLoggedOut={() => setUser(null)} />
           </div> :
@@ -90,11 +87,15 @@ function App() {
           
           <Route
             path="/student/dashboard"
-            element={<StudentPortal user={user}><StudentDashboard user={user} /></StudentPortal>} />
+            element={<Navigate to="/student/houses" replace />} />
           
           <Route
             path="/student/houses"
             element={<StudentPortal user={user}><StudentHouseSearchPage /></StudentPortal>} />
+
+          <Route
+            path="/student/my-house"
+            element={<StudentPortal user={user}><StudentMyHousePage /></StudentPortal>} />
           
           <Route
             path="/student/houses/:houseId"
@@ -103,14 +104,6 @@ function App() {
           <Route
             path="/student/rental-requests"
             element={<StudentPortal user={user}><StudentRentalRequestsPage /></StudentPortal>} />
-          
-          <Route
-            path="/student/payments"
-            element={<StudentPortal user={user}><StudentPaymentsPage /></StudentPortal>} />
-          
-          <Route
-            path="/student/maintenance-requests"
-            element={<StudentPortal user={user}><StudentMaintenancePage /></StudentPortal>} />
           
           <Route
             path="/owner/dashboard"
@@ -135,10 +128,10 @@ function App() {
           <Route
             path="/owner/rental-requests"
             element={<OwnerPortal user={user}><OwnerRentalRequestsPage /></OwnerPortal>} />
-          
+
           <Route
-            path="/owner/maintenance-requests"
-            element={<OwnerPortal user={user}><OwnerMaintenancePage /></OwnerPortal>} />
+            path="/owner/reports"
+            element={<OwnerPortal user={user}><OwnerRepairReportsPage /></OwnerPortal>} />
           
           <Route
             path="/owner/subscriptions"
@@ -159,6 +152,14 @@ function App() {
           <Route
             path="/admin/house-approvals"
             element={<AdminHouseApprovalsPage user={user} />} />
+
+          <Route
+            path="/admin/houses"
+            element={<AdminHousesPage user={user} />} />
+
+          <Route
+            path="/admin/move-out-reports"
+            element={<AdminMoveOutReportsPage user={user} />} />
           
           <Route
             path="/worker/inspections"
@@ -263,7 +264,7 @@ function PublicLandingPage() {
           <article className="landing-step">
             <span className="landing-step-number">{t("03")}</span>
             <h3>{t("Request and confirm")}</h3>
-            <p>{t("Send a rental request, follow its status, and access maintenance support after moving in. The student service fee is due only after both sides confirm the rental is secured.")}</p>
+            <p>{t("Send a rental request and follow its status while the owner reviews your request.")}</p>
           </article>
         </div>
       </section>
@@ -272,7 +273,7 @@ function PublicLandingPage() {
         <div>
           <p className="eyebrow">{t("For property owners")}</p>
           <h2>{t("Share your home with students looking nearby.")}</h2>
-          <p>{t("Submit your listing and manage rental and maintenance requests in one place.")}</p>
+          <p>{t("Submit your listing and manage rental requests in one place.")}</p>
         </div>
         <Link className="landing-secondary-link" to="/register?role=owner">{t("Register a property ")}<span aria-hidden="true">{t("→")}</span></Link>
       </section>
@@ -502,16 +503,11 @@ function PhotoPreviews({ files, existing = [] }) {
 
 }
 
-function RequestError({ message }) {
-  return message ? <p className="notice error-notice" role="alert">{t(message)}</p> : null;
-}
-
 const ownerNavigation = [
 { to: '/owner/dashboard', label: 'Overview' },
 { to: '/owner/houses', label: 'My houses' },
 { to: '/owner/rental-requests', label: 'Rental requests' },
-{ to: '/owner/maintenance-requests', label: 'Maintenance' },
-{ to: '/owner/subscriptions', label: 'Billing' }];
+{ to: '/owner/reports', label: 'Reports' }];
 
 
 function OwnerPortal({ user, children }) {
@@ -561,31 +557,71 @@ function OwnerDashboard({ user }) {
         <RequestError message={error} />
         {data &&
         <>
-            <div className="owner-stat-grid">
+            <div className="owner-stat-grid owner-dashboard-stat-grid">
               <OwnerStat label={t("Total houses")} value={data.counts.houses} detail="Registered to your account" />
               <OwnerStat label={t("Available")} value={data.counts.available_houses} detail="Currently marked available" />
               <OwnerStat label={t("Awaiting verification")} value={data.counts.awaiting_verification} detail="Not yet verified" />
               <OwnerStat label={t("Pending rental requests")} value={data.counts.pending_rental_requests} detail="Requests awaiting a response" />
-            </div>
-            <div className="owner-summary-row">
-              <div className="owner-summary-card">
-                <p className="eyebrow">{t("Proposed subscription")}</p>
-                <strong>{Number(data.owner_subscription_monthly_tnd).toFixed(3)}{t(" TND")}</strong>
-                <span>{t("per registered house / month")}</span>
-              </div>
-              <Link className="owner-summary-card owner-summary-link" to="/owner/subscriptions">
-                <p className="eyebrow">{t("Subscription status")}</p>
-                {data.subscriptions.length ?
-              <strong>{data.subscriptions.length}{t(" recorded")}</strong> :
-              <strong>{t("No subscription records")}</strong>}
-                <span>{t("No payment is processed by this platform yet.")}</span>
-              </Link>
             </div>
           </>
         }
       </section>
     </OwnerPortal>);
 
+}
+
+function OwnerRepairReportsPage() {
+  const [reports, setReports] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(null);
+
+  useEffect(() => {
+    setLoading(true);
+    setError('');
+    apiRequest(`/api/owner/repair-reports?page=${page}`).
+    then(({ repair_reports: result }) => {
+      setReports(result.data);
+      setPagination(result);
+    }).
+    catch((requestError) => {
+      setReports([]);
+      setPagination(null);
+      setError(requestError.message);
+    }).
+    finally(() => setLoading(false));
+  }, [page]);
+
+  return (
+    <section className="owner-content">
+      <div className="owner-heading">
+        <div>
+          <p className="eyebrow">{t("Property care")}</p>
+          <h1>{t("Repair reports")}</h1>
+          <p className="auth-description">{t("View completed repairs carried out by the Sakani team for your houses, including the repair outcome and evidence.")}</p>
+        </div>
+      </div>
+      {loading && <p className="form-note">{t("Loading repair reports…")}</p>}
+      <RequestError message={error} />
+      {!loading && !error && reports.length === 0 &&
+        <EmptyState
+          title={t("No completed repair reports")}
+          description={t("Reports will appear here after repair work is completed and confirmed for one of your houses.")} />
+      }
+      <div className="maintenance-request-list">
+        {reports.map((report) =>
+          <MaintenanceRequestCard key={report.id} item={report} audience="owner" />
+        )}
+      </div>
+      {!loading && pagination?.last_page > 1 &&
+        <div className="pagination-controls">
+          <button className="secondary-link" type="button" disabled={!pagination.prev_page_url} onClick={() => setPage((current) => current - 1)}>{t("Previous")}</button>
+          <span>{t("Page ")}{pagination.current_page}{t(" of ")}{pagination.last_page}</span>
+          <button className="secondary-link" type="button" disabled={!pagination.next_page_url} onClick={() => setPage((current) => current + 1)}>{t("Next")}</button>
+        </div>
+      }
+    </section>);
 }
 
 function OwnerStat({ label, value, detail }) {
@@ -601,7 +637,9 @@ function OwnerStat({ label, value, detail }) {
 function OwnerHousesPage() {
   const [houses, setHouses] = useState([]);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
+  const [deletingHouseId, setDeletingHouseId] = useState(null);
 
   useEffect(() => {
     apiRequest('/api/owner/houses').
@@ -609,6 +647,27 @@ function OwnerHousesPage() {
     catch((requestError) => setError(requestError.message)).
     finally(() => setLoading(false));
   }, []);
+
+  async function requestHouseDeletion(house) {
+    if (!window.confirm(t("Send this house for administrator deletion approval?"))) return;
+
+    setDeletingHouseId(house.id);
+    setError('');
+    setNotice('');
+    try {
+      const result = await apiRequest(`/api/owner/houses/${house.id}/deletion-request`, { method: 'POST' });
+      setHouses((current) => current.map((item) =>
+        item.id === house.id
+          ? { ...item, owner_deletion_requested_at: result.owner_deletion_requested_at }
+          : item
+      ));
+      setNotice(result.message);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setDeletingHouseId(null);
+    }
+  }
 
   return (
     <section className="owner-content">
@@ -618,6 +677,7 @@ function OwnerHousesPage() {
       </div>
       {loading && <p className="form-note">{t("Loading your houses…")}</p>}
       <RequestError message={error} />
+      {notice && <div className="notice success-notice" role="status">{t(notice)}</div>}
       {!loading && houses.length > 0 &&
       <div className="worker-approval-note">
           <strong>{t("Your house submissions and their review status")}</strong>
@@ -635,11 +695,13 @@ function OwnerHousesPage() {
       <div className="house-card-grid">
         {houses.map((house) =>
         <article className="house-card" key={house.id}>
-            {house.photos[0] ?
-          <img className="house-card-image" src={house.photos[0].url} alt={`Photo of ${house.title}`} /> :
-
-          <div className="house-card-image house-image-placeholder" aria-hidden="true">{t("⌂")}</div>
-          }
+            {house.photos.length > 0 ?
+            <div className="house-card-gallery" aria-label={t("Photos of {house}").replace('{house}', house.title)}>
+              {house.photos.map((photo, index) =>
+                <img key={photo.id} src={photo.url} alt={photo.caption || `${t("Photo")} ${index + 1} ${t("of")} ${house.title}`} loading="lazy" />
+              )}
+            </div> :
+            <div className="house-card-image house-image-placeholder" aria-hidden="true">{t("⌂")}</div>}
             <div className="house-card-content">
               <div className="house-card-heading">
                 <h2>{house.title}</h2>
@@ -651,9 +713,24 @@ function OwnerHousesPage() {
                 {house.public_listing_price_tnd !== null && <span>{t("Public price: ")}{Number(house.public_listing_price_tnd).toFixed(3)}{t(" TND / month")}</span>}
                 <span>{house.bedrooms} {t(house.bedrooms === 1 ? 'bedroom' : 'bedrooms')}</span>
               </div>
-              <div className="house-card-actions">
+              {house.owner_deletion_requested_at &&
+                <p className="notice pending-deletion-notice" role="status">{t("Deletion request awaiting administrator approval.")}</p>
+              }
+              <div className="house-card-actions owner-house-actions">
                 <Link to={`/owner/houses/${house.id}`}>{t("View details")}</Link>
-                <Link to={`/owner/houses/${house.id}/edit`}>{t("Edit")}</Link>
+                {!house.owner_deletion_requested_at && <Link to={`/owner/houses/${house.id}/edit`}>{t("Edit")}</Link>}
+                {!house.owner_deletion_requested_at &&
+                <button
+                  className="owner-delete-request-button"
+                  type="button"
+                  disabled={deletingHouseId === house.id}
+                  onClick={() => requestHouseDeletion(house)}>
+                  <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false">
+                    <path d="M4 6h12M8 6V4h4v2m-6 0 .7 10h6.6L14 6M8.5 9v4m3-4v4" />
+                  </svg>
+                  {deletingHouseId === house.id ? t("Sending…") : t("Request removal")}
+                </button>
+                }
               </div>
             </div>
           </article>
@@ -935,13 +1012,24 @@ function OwnerMaintenancePage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pagination, setPagination] = useState(null);
 
   useEffect(() => {
-    apiRequest('/api/owner/maintenance-requests').
-    then(({ maintenance_requests: items }) => setRequests(items)).
-    catch((requestError) => setError(requestError.message)).
+    setLoading(true);
+    setError('');
+    apiRequest(`/api/owner/maintenance-requests?page=${page}`).
+    then(({ maintenance_requests: result }) => {
+      setRequests(result.data);
+      setPagination(result);
+    }).
+    catch((requestError) => {
+      setRequests([]);
+      setPagination(null);
+      setError(requestError.message);
+    }).
     finally(() => setLoading(false));
-  }, [refresh]);
+  }, [page, refresh]);
 
   return (
     <section className="owner-content">
@@ -955,6 +1043,13 @@ function OwnerMaintenancePage() {
       <div className="maintenance-request-list">
         {requests.map((item) => <OwnerMaintenanceCard key={item.id} item={item} onChanged={() => setRefresh((value) => value + 1)} />)}
       </div>
+      {!loading && pagination?.last_page > 1 &&
+      <div className="pagination-controls">
+        <button className="secondary-link" type="button" disabled={!pagination.prev_page_url} onClick={() => setPage((current) => current - 1)}>{t("Previous")}</button>
+        <span>{t("Page ")}{pagination.current_page}{t(" of ")}{pagination.last_page}</span>
+        <button className="secondary-link" type="button" disabled={!pagination.next_page_url} onClick={() => setPage((current) => current + 1)}>{t("Next")}</button>
+      </div>
+      }
     </section>);
 
 }
@@ -971,7 +1066,6 @@ function OwnerMaintenanceCard({ item, onChanged }) {
   async function send(path, body) {
     setBusy(true);
     setError('');
-    setErrors({});
     setNotice('');
     try {
       const result = await apiRequest(path, { method: 'POST', body: JSON.stringify(body) });
@@ -980,7 +1074,6 @@ function OwnerMaintenanceCard({ item, onChanged }) {
       setDispute('');
       onChanged();
     } catch (requestError) {
-      setErrors(requestError.errors ?? {});
       setError(requestError.message);
     } finally {
       setBusy(false);
@@ -1332,7 +1425,9 @@ function AdminPriceNegotiationsPage({ user }) {
   const [houses, setHouses] = useState([]);
   const [listingMargin, setListingMargin] = useState('20.000');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
+  const [deletingHouseId, setDeletingHouseId] = useState(null);
 
   useEffect(() => {
     if (user?.role !== 'admin') return;
@@ -1354,11 +1449,30 @@ function AdminPriceNegotiationsPage({ user }) {
     ));
   }
 
+  async function deleteHouse(house) {
+    if (!window.confirm(t('Permanently delete this house and all linked rental, payment, inspection, maintenance records, and photos? This cannot be undone.'))) return;
+
+    setDeletingHouseId(house.id);
+    setError('');
+    setNotice('');
+    try {
+      const result = await apiRequest(`/api/admin/houses/${house.id}`, { method: 'DELETE' });
+      setHouses((current) => current.filter((listing) => listing.id !== house.id));
+      setNotice(result.message);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setDeletingHouseId(null);
+    }
+  }
+
   return (
     <div className="owner-portal">
       <nav className="owner-nav" aria-label={t("Administrator dashboard")}>
         <NavLink className="owner-nav-link" to="/admin/house-approvals">{t("Inspection reviews")}</NavLink>
         <NavLink className="owner-nav-link" to="/admin/price-negotiations">{t("Submissions & pricing")}</NavLink>
+        <NavLink className="owner-nav-link" to="/admin/move-out-reports">{t("Move-out reports")}</NavLink>
+        <NavLink className="owner-nav-link" to="/admin/houses">{t("All house posts")}</NavLink>
       </nav>
       <section className="owner-content">
         <div className="owner-heading">
@@ -1370,12 +1484,19 @@ function AdminPriceNegotiationsPage({ user }) {
         </div>
         {loading && <p className="form-note">{t("Loading pending houses…")}</p>}
         <RequestError message={error} />
+        {notice && <div className="notice success-notice" role="status">{t(notice)}</div>}
         {!loading && !error && houses.length === 0 &&
         <EmptyState title={t("No houses awaiting review")} description={t("New owner submissions will appear here until their price and inspection workflow is complete.")} />
         }
         <div className="negotiation-list">
           {houses.map((house) =>
-          <AdminNegotiationCard key={house.id} house={house} listingMargin={listingMargin} onUpdated={updateHouse} />
+          <AdminNegotiationCard
+            key={house.id}
+            house={house}
+            listingMargin={listingMargin}
+            onUpdated={updateHouse}
+            onDelete={deleteHouse}
+            deleting={deletingHouseId === house.id} />
           )}
         </div>
       </section>
@@ -1385,6 +1506,7 @@ function AdminPriceNegotiationsPage({ user }) {
 
 function AdminHouseApprovalsPage({ user }) {
   const [inspections, setInspections] = useState([]);
+  const [studentRequests, setStudentRequests] = useState([]);
   const [pendingSubmissionCount, setPendingSubmissionCount] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
@@ -1393,10 +1515,12 @@ function AdminHouseApprovalsPage({ user }) {
     if (user?.role !== 'admin') return;
     Promise.all([
     apiRequest('/api/admin/inspection-reviews'),
-    apiRequest('/api/admin/price-negotiations')]
+    apiRequest('/api/admin/price-negotiations'),
+    apiRequest('/api/admin/student-inspection-requests')]
     ).
-    then(([{ inspections: pendingReviews }, { houses }]) => {
+    then(([{ inspections: pendingReviews }, { houses }, { requests }]) => {
       setInspections(pendingReviews);
+      setStudentRequests(requests);
       setPendingSubmissionCount(houses.filter((house) => house.negotiation_status === 'pending').length);
     }).
     catch((requestError) => setError(requestError.message)).
@@ -1410,6 +1534,10 @@ function AdminHouseApprovalsPage({ user }) {
     setInspections((current) => current.filter((inspection) => inspection.id !== inspectionId));
   }
 
+  function removeStudentRequest(inspectionId) {
+    setStudentRequests((current) => current.filter((inspection) => inspection.id !== inspectionId));
+  }
+
   return (
     <div className="owner-portal">
       <nav className="owner-nav" aria-label={t("Administrator dashboard")}>
@@ -1417,6 +1545,8 @@ function AdminHouseApprovalsPage({ user }) {
         <NavLink className="owner-nav-link" to="/admin/price-negotiations">{t("\n          Submissions & pricing")}
           {pendingSubmissionCount > 0 ? ` (${pendingSubmissionCount})` : ''}
         </NavLink>
+        <NavLink className="owner-nav-link" to="/admin/move-out-reports">{t("Move-out reports")}</NavLink>
+        <NavLink className="owner-nav-link" to="/admin/houses">{t("All house posts")}</NavLink>
       </nav>
       <section className="owner-content">
         <Link className="admin-pending-submissions" to="/admin/price-negotiations">
@@ -1437,6 +1567,23 @@ function AdminHouseApprovalsPage({ user }) {
             <p className="auth-description">{t("Review completed inspections, then approve, reject, or request corrections before a house is shown to students.")}</p>
           </div>
         </div>
+        <section className="student-section">
+          <div className="student-section-heading">
+            <div><p className="eyebrow">{t("Student requests")}</p><h2>{t("Condition checks to assign")}</h2></div>
+            <span className="request-status status-pending">{studentRequests.length}</span>
+          </div>
+          {studentRequests.length === 0 && !loading ?
+            <p className="student-muted">{t("No student condition checks are waiting for assignment.")}</p> :
+            <div className="inspection-list">
+              {studentRequests.map((inspection) =>
+                <AdminStudentInspectionAssignmentCard
+                  key={inspection.id}
+                  inspection={inspection}
+                  onAssigned={() => removeStudentRequest(inspection.id)} />
+              )}
+            </div>
+          }
+        </section>
         {loading && <p className="form-note">{t("Loading inspection reports…")}</p>}
         <RequestError message={error} />
         {!loading && !error && inspections.length === 0 &&
@@ -1473,6 +1620,7 @@ function AdminHouseApprovalCard({ inspection, onReviewed }) {
         body: JSON.stringify({ decision, review_notes: reviewNotes })
       });
       setNotice(result.message);
+      setHouse((current) => ({ ...current, rental_request: result.rental_request }));
       onReviewed();
     } catch (requestError) {
       setError(requestError.message);
@@ -1485,15 +1633,27 @@ function AdminHouseApprovalCard({ inspection, onReviewed }) {
     <article className="inspection-card admin-approval-card">
       <div className="negotiation-card-heading">
         <div>
-          <p className="eyebrow">{t("House #")}{inspection.house.id}{t(" · inspection #")}{inspection.id}</p>
+          <p className="eyebrow">{inspection.student
+            ? inspection.rental_request_id ? t("Rental request report · ") : t("Student condition check · ")
+            : t("House #")}{inspection.house.id}{t(" · inspection #")}{inspection.id}</p>
           <h2>{inspection.house.title}</h2>
           <p>{inspection.house.city}{t(", ")}{inspection.house.governorate}</p>
         </div>
-        <VerificationBadge status="inspection_completed" />
+        {inspection.student ?
+          <span className="verification-badge status-verified">{t("Requested by student")}</span> :
+          <VerificationBadge status="inspection_completed" />}
       </div>
       <div className="negotiation-owner-contact">
-        <strong>{t("Owner: ")}{inspection.owner?.name}</strong>
-        <span>{inspection.owner?.phone || 'No phone number recorded'}</span>
+        {inspection.student ?
+          <>
+            <strong>{t("Student: ")}{inspection.student.name}</strong>
+            <span>{inspection.student.email}</span>
+            <span>{inspection.student.phone || t("No phone number recorded")}</span>
+          </> :
+          <>
+            <strong>{t("Owner: ")}{inspection.owner?.name}</strong>
+            <span>{inspection.owner?.phone || 'No phone number recorded'}</span>
+          </>}
         <span>{inspection.worker?.name ? `Inspected by ${inspection.worker.name}` : 'Worker details unavailable'}</span>
         <span>{t("Completed ")}{formatDate(inspection.completed_at)}</span>
         <strong>{inspection.house.public_listing_price_tnd === null ?
@@ -1537,7 +1697,11 @@ function AdminHouseApprovalCard({ inspection, onReviewed }) {
         <textarea maxLength="10000" value={reviewNotes} onChange={(event) => setReviewNotes(event.target.value)} />
       </label>
       <RequestError message={error} />
-      <div className="approval-actions">
+      {inspection.student ?
+        <div className="approval-actions">
+          <button className="primary-button" type="button" disabled={busy} onClick={() => decide('report_shared')}>{t("Share report with student")}</button>
+        </div> :
+        <div className="approval-actions">
         <button
           className="primary-button"
           type="button"
@@ -1553,13 +1717,163 @@ function AdminHouseApprovalCard({ inspection, onReviewed }) {
         <button className="secondary-link reject-approval" type="button" disabled={busy} onClick={() => decide('rejected')}>{t("\n          Reject listing\n        ")}
 
         </button>
-      </div>
+        </div>
+      }
       {notice && <p className="notice success-notice" role="status">{notice}</p>}
     </article>);
 
 }
 
-function AdminNegotiationCard({ house, listingMargin, onUpdated }) {
+function AdminMoveOutReportsPage({ user }) {
+  const [reports, setReports] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return;
+    apiRequest('/api/admin/move-out-reports')
+      .then(({ reports: items }) => setReports(items))
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setLoading(false));
+  }, [user]);
+
+  if (!user) return <Navigate to="/login" replace />;
+  if (user.role !== 'admin') return <Navigate to={dashboardPath(user.role)} replace />;
+
+  async function markReviewed(report) {
+    setBusyId(report.id);
+    setError('');
+    try {
+      const result = await apiRequest(`/api/admin/move-out-reports/${report.id}/review`, { method: 'POST' });
+      setReports((current) => current.map((item) => item.id === report.id
+        ? { ...item, status: 'reviewed', reviewed_at: result.reviewed_at }
+        : item));
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div className="owner-portal">
+      <nav className="owner-nav" aria-label={t("Administrator dashboard")}>
+        <NavLink className="owner-nav-link" to="/admin/house-approvals">{t("Inspection reviews")}</NavLink>
+        <NavLink className="owner-nav-link" to="/admin/price-negotiations">{t("Submissions & pricing")}</NavLink>
+        <NavLink className="owner-nav-link" to="/admin/move-out-reports">{t("Move-out reports")}</NavLink>
+        <NavLink className="owner-nav-link" to="/admin/houses">{t("All house posts")}</NavLink>
+      </nav>
+      <section className="owner-content">
+        <div className="owner-heading">
+          <div>
+            <p className="eyebrow">{t("Internal staff · private")}</p>
+            <h1>{t("Student move-out reports")}</h1>
+            <p className="auth-description">{t("Review students’ planned move-out dates and messages. Reviewing a report does not end a rental automatically.")}</p>
+          </div>
+        </div>
+        {loading && <p className="form-note">{t("Loading move-out reports…")}</p>}
+        <RequestError message={error} />
+        {!loading && !error && reports.length === 0 &&
+          <EmptyState title={t("No move-out reports")} description={t("Student reports will appear here when submitted.")} />
+        }
+        <div className="negotiation-list">
+          {reports.map((report) =>
+            <article className="negotiation-card" key={report.id}>
+              <div className="negotiation-card-heading">
+                <div>
+                  <p className="eyebrow">{t("Planned move-out: ")}{formatDate(report.planned_move_out_at)}</p>
+                  <h2>{report.house.title}</h2>
+                  <p>{report.house.city}{t(", ")}{report.house.governorate}{t(" · ")}{report.student.name}</p>
+                </div>
+                <span className={`request-status status-${report.status}`}>{t(report.status)}</span>
+              </div>
+              <div className="move-out-report-message">
+                <strong>{t("Student report")}</strong>
+                <p>{report.message}</p>
+                <span>{report.student.email}{report.student.phone ? ` · ${report.student.phone}` : ''}</span>
+              </div>
+              {report.reviewed_at
+                ? <p className="student-muted">{t("Reviewed ")}{formatDate(report.reviewed_at)}</p>
+                : <button className="primary-button" type="button" disabled={busyId === report.id} onClick={() => markReviewed(report)}>
+                    {busyId === report.id ? t("Saving…") : t("Mark as reviewed")}
+                  </button>}
+            </article>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function AdminStudentInspectionAssignmentCard({ inspection, onAssigned }) {
+  const [workers, setWorkers] = useState([]);
+  const [workerId, setWorkerId] = useState('');
+  const [scheduledAt, setScheduledAt] = useState(() => {
+    const date = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    date.setDate(date.getDate() + 1);
+    return date.toISOString().slice(0, 16);
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    apiRequest(`/api/admin/workers?governorate=${encodeURIComponent(inspection.house.governorate)}`)
+      .then(({ workers: availableWorkers }) => {
+        setWorkers(availableWorkers);
+        setWorkerId(availableWorkers[0] ? String(availableWorkers[0].id) : '');
+      })
+      .catch((requestError) => setError(requestError.message));
+  }, [inspection.house.governorate]);
+
+  async function assign(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    try {
+      await apiRequest(`/api/admin/inspections/${inspection.id}/assignment`, {
+        method: 'POST',
+        body: JSON.stringify({ worker_id: Number(workerId), scheduled_at: scheduledAt })
+      });
+      onAssigned();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className="inspection-card">
+      <div className="negotiation-card-heading">
+        <div>
+          <p className="eyebrow">{t(inspection.rental_request_id ? "Rental request inspection" : "Student condition check")}</p>
+          <h3>{inspection.house.title}</h3>
+          <p>{inspection.house.city}{t(", ")}{inspection.house.governorate}</p>
+        </div>
+        <span className="request-status status-pending">{t(inspection.rental_request_id ? "Rental request inspection" : "Awaiting assignment")}</span>
+      </div>
+      <p className="student-contact"><strong>{inspection.rental_request_id ? t("Rental request from ") : ''}{inspection.student?.name}</strong><span>{inspection.student?.email}{inspection.student?.phone ? ` · ${inspection.student.phone}` : ''}</span></p>
+      <form className="house-form-card" onSubmit={assign}>
+        <label className="form-field">
+          <span>{t("Assign local inspector")}</span>
+          <select required value={workerId} onChange={(event) => setWorkerId(event.target.value)} disabled={!workers.length || busy}>
+            {workers.length === 0 && <option value="">{t("No inspectors available in this governorate")}</option>}
+            {workers.map((worker) => <option key={worker.id} value={worker.id}>{worker.name}</option>)}
+          </select>
+        </label>
+        <label className="form-field">
+          <span>{t("Schedule inspection")}</span>
+          <input required type="datetime-local" value={scheduledAt} onChange={(event) => setScheduledAt(event.target.value)} disabled={busy} />
+        </label>
+        <RequestError message={error} />
+        <button className="primary-button" type="submit" disabled={busy || !workerId || !scheduledAt}>{t("Assign inspection")}</button>
+      </form>
+    </article>
+  );
+}
+
+function AdminNegotiationCard({ house, listingMargin, onUpdated, onDelete, deleting }) {
   const [status, setStatus] = useState('negotiation_in_progress');
   const [proposed, setProposed] = useState(house.proposed_owner_rent_tnd ?? '');
   const [agreed, setAgreed] = useState(house.agreed_owner_rent_tnd ?? house.original_owner_rent_tnd);
@@ -1737,6 +2051,15 @@ function AdminNegotiationCard({ house, listingMargin, onUpdated }) {
         </form>
       }
       {notice && <p className="notice success-notice" role="status">{notice}</p>}
+      <div className="house-card-actions">
+        <button
+          className="danger-button"
+          type="button"
+          disabled={busy || deleting}
+          onClick={() => onDelete(house)}>
+          {deleting ? t("Deleting…") : t("Delete post")}
+        </button>
+      </div>
     </article>);
 
 }
@@ -1972,11 +2295,9 @@ function InspectionChecklistView({ checklist }) {
 }
 
 const studentNavigation = [
-{ to: '/student/dashboard', label: 'Overview' },
 { to: '/student/houses', label: 'Browse homes' },
 { to: '/student/rental-requests', label: 'Requests' },
-{ to: '/student/payments', label: 'Fees' },
-{ to: '/student/maintenance-requests', label: 'Maintenance' }];
+{ to: '/student/my-house', label: 'My house' }];
 
 
 function StudentPortal({ user, children }) {
@@ -1995,138 +2316,198 @@ function StudentPortal({ user, children }) {
 
 }
 
-function StudentDashboard({ user }) {
-  const [data, setData] = useState(null);
+function formatDate(value) {
+  return value ? new Date(value).toLocaleDateString(getLanguage() === 'fr' ? 'fr-TN' : 'en-TN') : t('Date not available');
+}
+
+function StudentMyHousePage() {
+  const [houses, setHouses] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
-  const [location, setLocation] = useState({ governorate: '', city: '' });
-  const navigate = useNavigate();
 
   useEffect(() => {
     setLoading(true);
-    apiRequest('/api/student/dashboard').
-    then(setData).
-    catch((requestError) => setError(requestError.message)).
-    finally(() => setLoading(false));
+    setError('');
+    apiRequest('/api/student/my-houses')
+      .then(({ houses: rentals }) => setHouses(rentals))
+      .catch((requestError) => setError(requestError.message))
+      .finally(() => setLoading(false));
   }, [refresh]);
-
-  function search(event) {
-    event.preventDefault();
-    const query = new URLSearchParams();
-    Object.entries(location).forEach(([key, value]) => {
-      if (value.trim()) query.set(key, value.trim());
-    });
-    navigate(`/student/houses${query.toString() ? `?${query}` : ''}`);
-  }
 
   return (
     <section className="owner-content student-content">
       <div className="owner-heading">
         <div>
-          <p className="eyebrow">{t("Student space")}</p>
-          <h1>{t("Welcome, ")}{user.name.split(' ')[0]}{t(".")}</h1>
-          <p className="auth-description">{t("Find an approved home and manage your rental requests in one place.")}</p>
+          <p className="eyebrow">{t("Your housing journey")}</p>
+          <h1>{t("My house")}</h1>
+          <p className="auth-description">{t("View the home you are currently renting and send the company a move-out report when you plan to leave.")}</p>
         </div>
       </div>
-      {loading && <p className="form-note">{t("Loading your dashboard…")}</p>}
+      {loading && <p className="form-note">{t("Loading your house…")}</p>}
       <RequestError message={error} />
-      {data &&
-      <>
-          <form className="student-search-card" onSubmit={search}>
-            <div>
-              <p className="eyebrow">{t("Start your search")}</p>
-              <h2>{t("Find a verified home")}</h2>
-            </div>
-            <div className="student-search-fields">
-              <label className="form-field">
-                <span>{t("Governorate")}</span>
-                <input value={location.governorate} onChange={(event) => setLocation((current) => ({ ...current, governorate: event.target.value }))} placeholder={t("e.g. Tunis")} />
-              </label>
-              <label className="form-field">
-                <span>{t("City")}</span>
-                <input value={location.city} onChange={(event) => setLocation((current) => ({ ...current, city: event.target.value }))} placeholder={t("e.g. Ariana")} />
-              </label>
-              <button className="primary-button" type="submit">{t("Search homes ")}<span aria-hidden="true">{t("→")}</span></button>
-            </div>
-          </form>
-
-          <div className="fee-notice">
-            <strong>{t("Student service fee: ")}{Number(data.student_service_fee_tnd).toFixed(3)}{t(" TND")}</strong>
-            <span>{t("Only due after you and the owner both confirm that the rental is secured. No payment is taken before then. ")}<Link to="/student/payments">{t("View payment records")}</Link></span>
-          </div>
-
-          <section className="student-section">
-            <div className="student-section-heading">
-              <div><p className="eyebrow">{t("Approved and available")}</p><h2>{t("Recently listed homes")}</h2></div>
-              <Link className="secondary-link" to="/student/houses">{t("See all homes")}</Link>
-            </div>
-            {data.recent_houses.length ?
-          <div className="house-card-grid">{data.recent_houses.map((house) => <MarketplaceHouseCard key={house.id} house={house} />)}</div> :
-          <EmptyState title={t("No verified homes yet")} description={t("New homes will appear here after an administrator approves their inspection.")} />}
-          </section>
-
-          <section className="student-section">
-            <div className="student-section-heading">
-              <div><p className="eyebrow">{t("Keep track")}</p><h2>{t("Active rental requests")}</h2></div>
-              <Link className="secondary-link" to="/student/rental-requests">{t("Request history")}</Link>
-            </div>
-            {data.active_requests.length ?
-          <div className="rental-request-list">{data.active_requests.map((rentalRequest) =>
-            <RentalRequestCard key={rentalRequest.id} request={rentalRequest} audience="student" onChanged={() => setRefresh((value) => value + 1)} />
-            )}</div> :
-          <EmptyState title={t("No active requests")} description={t("When you request a visit or express interest in a home, its status will appear here.")} />}
-          </section>
-
-          <section className="student-section">
-            <div className="student-section-heading">
-              <div><p className="eyebrow">{t("Past activity")}</p><h2>{t("Rental request history")}</h2></div>
-            </div>
-            {data.request_history.length ?
-          <div className="rental-request-list">{data.request_history.map((rentalRequest) =>
-            <RentalRequestCard key={rentalRequest.id} request={rentalRequest} audience="student" onChanged={() => setRefresh((value) => value + 1)} />
-            )}</div> :
-          <p className="student-muted">{t("Completed, rejected, and cancelled requests will be kept here.")}</p>}
-          </section>
-
-          {data.maintenance_requests.length > 0 &&
-        <section className="student-section">
-              <div className="student-section-heading"><div><p className="eyebrow">{t("Your rented home")}</p><h2>{t("Maintenance updates")}</h2></div></div>
-              <div className="maintenance-summary-list">
-                {data.maintenance_requests.map((item) =>
-            <article className="maintenance-summary" key={item.id}>
-                    <div><strong>{item.description}</strong><span>{t(item.priority)}{t(" priority · ")}{t(item.status.replaceAll('_', ' '))}</span></div>
-                    <time>{formatDate(item.reported_at)}</time>
-                  </article>
-            )}
-              </div>
-            </section>
-        }
-
-          <section id="account" className="student-account-card">
-            <div><p className="eyebrow">{t("Account information")}</p><h2>{data.account.name}</h2></div>
-            <dl><div><dt>{t("Email")}</dt><dd>{data.account.email}</dd></div><div><dt>{t("Phone")}</dt><dd>{data.account.phone || 'Not provided'}</dd></div></dl>
-          </section>
-        </>
+      {!loading && !error && houses.length === 0 &&
+        <EmptyState title={t("No active rented house")} description={t("A house will appear here after you and its owner both confirm the rental.")} />
       }
-    </section>);
-
+      <div className="rental-request-list">
+        {houses.map((rental) =>
+          <StudentMyHouseCard key={rental.rental_request_id} rental={rental} onChanged={() => setRefresh((value) => value + 1)} />
+        )}
+      </div>
+    </section>
+  );
 }
 
-function formatDate(value) {
-  return value ? new Date(value).toLocaleDateString(getLanguage() === 'fr' ? 'fr-TN' : 'en-TN') : t('Date not available');
+function StudentMyHouseCard({ rental, onChanged }) {
+  const [plannedMoveOutAt, setPlannedMoveOutAt] = useState('');
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [report, setReport] = useState(rental.move_out_report);
+  const today = new Date();
+  const minimumMoveOutDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await apiRequest(`/api/student/rental-requests/${rental.rental_request_id}/move-out-reports`, {
+        method: 'POST',
+        body: JSON.stringify({ planned_move_out_at: plannedMoveOutAt, message })
+      });
+      setReport(result.move_out_report);
+      setNotice(result.message);
+      onChanged();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <article className="rental-request-card my-house-card">
+      <div className="rental-request-heading">
+        <div>
+          <p className="eyebrow">{t("Currently renting")}</p>
+          <h2>{rental.house.title}</h2>
+          <span>{rental.house.city}{t(", ")}{rental.house.governorate}{rental.house.address ? ` · ${rental.house.address}` : ''}</span>
+        </div>
+        <span className="request-status status-completed">{t("Rental secured")}</span>
+      </div>
+      <p className="student-muted">{t("Rental started ")}{formatDate(rental.secured_at)}</p>
+      <div className="house-detail-list">
+        <div><dt>{t("Monthly rent")}</dt><dd>{Number(rental.house.monthly_rent_tnd).toFixed(3)}{t(" TND")}</dd></div>
+        <div><dt>{t("Bedrooms")}</dt><dd>{rental.house.bedrooms}</dd></div>
+      </div>
+      {rental.house.description && <p className="my-house-description">{rental.house.description}</p>}
+      {rental.house.photos.length > 0 &&
+        <div className="house-photo-grid">
+          {rental.house.photos.map((photo) =>
+            <img key={photo.id} src={photo.url} alt={photo.caption || `${t("Photo of")} ${rental.house.title}`} loading="lazy" />
+          )}
+        </div>
+      }
+      {report ? <>
+        <div className="notice success-notice" role="status">
+          <strong>{t(report.status === 'reviewed' ? "Move-out report reviewed" : "Move-out report sent")}</strong>
+          <span>{t("Planned move-out date: ")}{formatDate(report.planned_move_out_at)}</span>
+          <p>{report.message}</p>
+          <span>{t("This report informs the company; it does not end your rental automatically.")}</span>
+        </div>
+      </> : <>
+        <div className="notice report-pending-notice">
+          {t("Sending a report informs the company of your planned move-out. It does not end your rental automatically.")}
+        </div>
+        <form className="house-form-card move-out-report-form" onSubmit={submit}>
+          <label className="form-field">
+            <span>{t("Planned move-out date")}</span>
+            <input required type="date" min={minimumMoveOutDate} value={plannedMoveOutAt} onChange={(event) => setPlannedMoveOutAt(event.target.value)} />
+          </label>
+          <label className="form-field">
+            <span>{t("Move-out report")}</span>
+            <textarea required minLength={10} maxLength={10000} rows={4} value={message} onChange={(event) => setMessage(event.target.value)} placeholder={t("Tell the company when and why you plan to leave, and mention any house condition issues.")} />
+          </label>
+          <RequestError message={error} />
+          {notice && <p className="notice success-notice" role="status">{notice}</p>}
+          <button className="primary-button" type="submit" disabled={busy || !plannedMoveOutAt || message.trim().length < 10}>
+            {busy ? t("Sending report…") : t("Send move-out report")}
+          </button>
+        </form>
+      </>}
+    </article>
+  );
 }
 
-function EmptyState({ title, description }) {
-  return <div className="owner-empty-state compact-empty"><h2>{title}</h2><p>{description}</p></div>;
-}
+function MarketplaceHouseCard({ house, serviceFeeTnd }) {
+  const [checkRequest, setCheckRequest] = useState(house.check_request ?? null);
+  const [checking, setChecking] = useState(false);
+  const [rentalRequest, setRentalRequest] = useState(house.rental_request ?? null);
+  const [renting, setRenting] = useState(false);
+  const [showRentalDialog, setShowRentalDialog] = useState(false);
+  const rentalDialogRef = useRef(null);
+  const [error, setError] = useState('');
 
-function MarketplaceHouseCard({ house }) {
+  useEffect(() => {
+    const dialog = rentalDialogRef.current;
+    if (!dialog) return undefined;
+    if (showRentalDialog) dialog.showModal();
+    return () => {
+      if (dialog.open) dialog.close();
+    };
+  }, [showRentalDialog]);
+
+  async function requestCheck() {
+    setChecking(true);
+    setError('');
+    try {
+      const result = await apiRequest(`/api/student/houses/${house.id}/check-requests`, { method: 'POST' });
+      setCheckRequest(result.check_request);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function requestRental() {
+    setRenting(true);
+    setError('');
+    try {
+      const result = await apiRequest('/api/student/rental-requests', {
+        method: 'POST',
+        body: JSON.stringify({ house_id: house.id })
+      });
+      setRentalRequest(result.rental_request);
+      setShowRentalDialog(false);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setRenting(false);
+    }
+  }
+
+  const monthlyRent = Number(house.monthly_rent_tnd);
+  const serviceFee = Number(serviceFeeTnd);
+  const firstPaymentTotal = monthlyRent + serviceFee;
+  const requestInProgress = checkRequest && (
+    checkRequest.status === 'requested' ||
+    checkRequest.status === 'assigned' ||
+    (checkRequest.status === 'completed' && !checkRequest.shared_at)
+  );
+
   return (
     <article className="house-card marketplace-house-card">
-      <Link to={`/student/houses/${house.id}`} aria-label={`View ${house.title}`}>
-        {house.photos[0] ?
-        <img className="house-card-image" src={house.photos[0].url} alt={`Photo of ${house.title}`} /> :
+      <Link className="marketplace-house-gallery-link" to={`/student/houses/${house.id}`} aria-label={`${t("View")} ${house.title}`}>
+        {house.photos.length > 0 ?
+        <div className="house-card-gallery" aria-label={t("Photos of {house}").replace('{house}', house.title)}>
+          {house.photos.map((photo, index) =>
+            <img key={photo.id} src={photo.url} alt={photo.caption || `${t("Photo")} ${index + 1} ${t("of")} ${house.title}`} loading="lazy" />
+          )}
+        </div> :
         <div className="house-card-image house-image-placeholder" aria-hidden="true">{t("⌂")}</div>}
       </Link>
       <div className="house-card-content">
@@ -2134,6 +2515,58 @@ function MarketplaceHouseCard({ house }) {
         <p>{house.city}{t(", ")}{house.governorate}</p>
         <div className="house-card-meta"><span>{Number(house.monthly_rent_tnd).toFixed(3)}{t(" TND / month")}</span><span>{house.bedrooms}{t(" bedrooms")}</span></div>
         <div className="house-card-actions"><Link to={`/student/houses/${house.id}`}>{t("View details")}</Link><span>{t("Inspected ")}{formatDate(house.inspection?.date)}</span></div>
+        <div className="marketplace-action-grid">
+          <div className="marketplace-check-action">
+            <button className="primary-button" type="button" disabled={checking || requestInProgress} onClick={requestCheck}>
+              {checking ? t("Sending inspection request…") : checkRequest?.shared_at ? t("Request another check") : requestInProgress ? t("Check request in progress") : t("Ask company to check house")}
+            </button>
+            {checkRequest && <p className="student-muted" role="status">
+              {checkRequest.shared_at ? t("Report shared — view house details") :
+                checkRequest.status === 'requested' ? t("Check requested — awaiting assignment") :
+                checkRequest.status === 'assigned' ? t("Inspector assigned — visit scheduled") :
+                t("Inspection complete — company review pending")}
+            </p>}
+          </div>
+          <div className="marketplace-rent-action">
+            <button
+              className="primary-button"
+              type="button"
+              disabled={renting || Boolean(rentalRequest) || !house.available}
+              onClick={() => setShowRentalDialog(true)}>
+              {renting ? t("Sending request…") : rentalRequest ? t("Rental request sent") : t("Rent now")}
+            </button>
+            {rentalRequest?.payment_obligation &&
+              <PaymentObligationNotice obligation={rentalRequest.payment_obligation} />
+            }
+            {rentalRequest &&
+              <Link to="/student/rental-requests">{t("View rental request")}</Link>
+            }
+          </div>
+        </div>
+        <RequestError message={error} />
+        {showRentalDialog && <dialog
+          ref={rentalDialogRef}
+          className="rental-checkout-dialog"
+          aria-labelledby={`rental-dialog-title-${house.id}`}
+          onCancel={(event) => {
+            event.preventDefault();
+            if (!renting) setShowRentalDialog(false);
+          }}>
+            <button className="rental-dialog-close" type="button" aria-label={t("Close")} disabled={renting} onClick={() => setShowRentalDialog(false)}>×</button>
+            <p className="eyebrow">{t("Rental payment")}</p>
+            <h2 id={`rental-dialog-title-${house.id}`}>{t("Review your first payment")}</h2>
+            <div className="rental-dialog-breakdown">
+              <div><span>{t("First month’s rent: ")}</span><strong>{monthlyRent.toFixed(3)} {t("TND")}</strong></div>
+              <div><span>{t("One-time company service fee: ")}</span><strong>{serviceFee.toFixed(3)} {t("TND")}</strong></div>
+              <div className="rental-dialog-total"><span>{t("Total")}</span><strong>{firstPaymentTotal.toFixed(3)} {t("TND")}</strong></div>
+            </div>
+            <p className="rental-dialog-warning">{t("Secure D17 checkout is not available yet. Sakani will not ask for your D17 PIN, password, or banking details. Continuing sends a rental request and records this amount as pending; no payment is collected or validated.")}</p>
+            <div className="rental-dialog-actions">
+              <button className="rental-dialog-cancel" type="button" disabled={renting} onClick={() => setShowRentalDialog(false)}>{t("Cancel")}</button>
+              <button className="primary-button" type="button" disabled={renting} onClick={requestRental}>{renting ? t("Sending request…") : t("Send rental request")}</button>
+            </div>
+        </dialog>}
+        {checkRequest?.shared_at && <Link className="marketplace-report-link" to={`/student/houses/${house.id}`}>{t("View inspection report")}</Link>}
       </div>
     </article>);
 
@@ -2144,6 +2577,7 @@ function StudentHouseSearchPage() {
   const queryString = searchParams.toString();
   const [filters, setFilters] = useState({});
   const [listing, setListing] = useState(null);
+  const [serviceFeeTnd, setServiceFeeTnd] = useState(20);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -2159,7 +2593,10 @@ function StudentHouseSearchPage() {
     setLoading(true);
     setError('');
     apiRequest(`/api/student/houses${queryString ? `?${queryString}` : ''}`).
-    then(({ houses }) => setListing(houses)).
+    then(({ houses, student_service_fee_tnd }) => {
+      setListing(houses);
+      setServiceFeeTnd(Number(student_service_fee_tnd));
+    }).
     catch((requestError) => setError(requestError.message)).
     finally(() => setLoading(false));
   }, [queryString, searchParams]);
@@ -2210,7 +2647,7 @@ function StudentHouseSearchPage() {
       {!loading && !error && listing &&
       <>
           {listing.data.length ?
-        <div className="house-card-grid marketplace-results">{listing.data.map((house) => <MarketplaceHouseCard key={house.id} house={house} />)}</div> :
+        <div className="house-card-grid marketplace-results">{listing.data.map((house) => <MarketplaceHouseCard key={house.id} house={house} serviceFeeTnd={serviceFeeTnd} />)}</div> :
         <EmptyState title={t("No homes match these filters")} description={t("Try increasing your rent limit or removing a filter.")} />}
           {listing.last_page > 1 &&
         <div className="pagination-controls">
@@ -2232,16 +2669,11 @@ function StudentHouseDetailsPage() {
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [fee, setFee] = useState(null);
-
+  const [checking, setChecking] = useState(false);
   useEffect(() => {
-    Promise.all([
-    apiRequest(`/api/student/houses/${houseId}`),
-    apiRequest('/api/student/dashboard')]
-    ).
-    then(([houseResult, dashboard]) => {
+    apiRequest(`/api/student/houses/${houseId}`).
+    then((houseResult) => {
       setHouse(houseResult.house);
-      setFee(dashboard.student_service_fee_tnd);
     }).
     catch((requestError) => setError(requestError.message)).
     finally(() => setLoading(false));
@@ -2257,12 +2689,31 @@ function StudentHouseDetailsPage() {
         body: JSON.stringify({ house_id: house.id })
       });
       setNotice(result.message);
+      setHouse((current) => ({ ...current, rental_request: result.rental_request }));
     } catch (requestError) {
       setError(requestError.message);
     } finally {
       setSubmitting(false);
     }
   }
+
+  async function requestCheck() {
+    setChecking(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await apiRequest(`/api/student/houses/${house.id}/check-requests`, { method: 'POST' });
+      setHouse((current) => ({ ...current, check_request: result.check_request }));
+      setNotice(result.message);
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  const checkRequest = house?.check_request;
+  const checkInProgress = checkRequest && (checkRequest.status === 'requested' || checkRequest.status === 'assigned' || (checkRequest.status === 'completed' && !checkRequest.shared_at));
 
   return (
     <section className="owner-content student-content">
@@ -2298,11 +2749,49 @@ function StudentHouseDetailsPage() {
               </> :
           <p className="student-muted">{t("No inspection summary is available.")}</p>}
           </section>
-          <div className="student-request-action">
-            <div><strong>{t("Student service fee: ")}{fee === null ? '…' : `${Number(fee).toFixed(3)} TND`}</strong><span>{t("Due only after you and the owner both confirm the rental is secured. Requesting a visit is free.")}</span></div>
-            <button className="primary-button" type="button" disabled={!house.available || submitting || fee === null} onClick={requestHouse}>
-              {submitting ? 'Sending request…' : house.available ? 'Request a visit / express interest' : 'Currently unavailable'} <span aria-hidden="true">{t("→")}</span>
+          <section className="student-check-request">
+            <div>
+              <p className="eyebrow">{t("Want a fresh condition check?")}</p>
+              <h3>{t("Ask the company to inspect this house")}</h3>
+              <p className="student-muted">{t("A local inspector will visit and the company will share the reviewed report with you.")}</p>
+            </div>
+            {checkRequest && <div className="notice" role="status">
+              <strong>{checkRequest.shared_at ? t("Inspection report shared") :
+                checkRequest.status === 'requested' ? t("Request sent — waiting for inspector assignment") :
+                checkRequest.status === 'assigned' ? `${t("Inspector visit scheduled: ")}${formatDate(checkRequest.scheduled_at)}` :
+                t("Inspection complete — the company is reviewing the report")}</strong>
+            </div>}
+            {checkRequest?.report &&
+              <div className="public-inspection">
+                <p className="eyebrow">{t("Company-reviewed inspection report")}</p>
+                <p><strong>{t("Inspector recommendation: ")}</strong>{t(checkRequest.report.recommendation.replaceAll('_', ' '))}</p>
+                <p><strong>{t("Inspection notes: ")}</strong>{checkRequest.report.notes}</p>
+                {checkRequest.report.defects_found && <p><strong>{t("Reported defects: ")}</strong>{checkRequest.report.defects_found}</p>}
+                {checkRequest.report.review_notes && <p><strong>{t("Company note: ")}</strong>{checkRequest.report.review_notes}</p>}
+                <ul className="submitted-checklist">
+                  {Object.entries(checkRequest.report.checklist ?? {}).map(([item, status]) =>
+                    <li key={item}><span>{t(item.replaceAll('_', ' '))}</span><strong>{t(status.replaceAll('_', ' '))}</strong></li>
+                  )}
+                </ul>
+                {checkRequest.report.photos.length > 0 &&
+                  <div className="house-photo-grid">
+                    {checkRequest.report.photos.map((photo) => <img key={photo.id} src={photo.url} alt={photo.caption || `Inspection photo of ${house.title}`} />)}
+                  </div>
+                }
+              </div>
+            }
+            <button className="secondary-link" type="button" disabled={checking || checkInProgress} onClick={requestCheck}>
+              {checking ? t("Sending inspection request…") : checkRequest?.shared_at ? t("Request another condition check") : t("Request a company inspection")}
             </button>
+          </section>
+          <div className="student-request-action">
+            <button className="primary-button" type="button" disabled={!house.available || submitting || Boolean(house.rental_request)} onClick={requestHouse}>
+              {submitting ? t("Sending request…") : house.rental_request ? t("Rental request sent") : house.available ? t("Rent now") : t("Currently unavailable")} <span aria-hidden="true">{t("→")}</span>
+            </button>
+            {house.rental_request?.payment_obligation &&
+              <PaymentObligationNotice obligation={house.rental_request.payment_obligation} />
+            }
+            {house.rental_request && <Link to="/student/rental-requests">{t("View rental request")}</Link>}
           </div>
         </article>
       }
@@ -2312,17 +2801,20 @@ function StudentHouseDetailsPage() {
 
 function StudentRentalRequestsPage() {
   const [requests, setRequests] = useState([]);
-  const [fee, setFee] = useState(null);
+  const [checkRequests, setCheckRequests] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [refresh, setRefresh] = useState(0);
 
   useEffect(() => {
     setLoading(true);
-    apiRequest('/api/student/rental-requests').
-    then(({ rental_requests: items, student_service_fee_tnd: serviceFee }) => {
+    Promise.all([
+      apiRequest('/api/student/rental-requests'),
+      apiRequest('/api/student/house-check-requests')
+    ]).
+    then(([{ rental_requests: items }, { check_requests: checks }]) => {
       setRequests(items);
-      setFee(serviceFee);
+      setCheckRequests(checks);
     }).
     catch((requestError) => setError(requestError.message)).
     finally(() => setLoading(false));
@@ -2331,17 +2823,120 @@ function StudentRentalRequestsPage() {
   return (
     <section className="owner-content student-content">
       <div className="owner-heading"><div><p className="eyebrow">{t("Your housing journey")}</p><h1>{t("My rental requests")}</h1><p className="auth-description">{t("Track owner responses and confirm when a rental is actually secured.")}</p></div></div>
-      {fee !== null && <div className="fee-notice"><strong>{t("Student service fee: ")}{Number(fee).toFixed(3)}{t(" TND")}</strong><span>{t("It becomes due only after both you and the owner confirm the rental is secured. No payment has been processed.")}</span></div>}
       {loading && <p className="form-note">{t("Loading your requests…")}</p>}
       <RequestError message={error} />
-      {!loading && !error && requests.length === 0 && <EmptyState title={t("No rental requests yet")} description={t("Search verified homes and request a visit to get started.")} />}
+      {!loading && !error && requests.length === 0 && checkRequests.length === 0 && <EmptyState title={t("No rental requests yet")} description={t("Search verified homes and request a visit to get started.")} />}
+      {checkRequests.length > 0 &&
+        <section className="student-section">
+          <div className="student-section-heading">
+            <div><p className="eyebrow">{t("House condition checks")}</p><h2>{t("Inspection requests")}</h2></div>
+          </div>
+          <div className="rental-request-list">
+            {checkRequests.map((checkRequest) =>
+              <StudentCheckRequestCard key={checkRequest.id} request={checkRequest} />
+            )}
+          </div>
+        </section>
+      }
+      {requests.length > 0 && <section className="student-section">
+        <div className="student-section-heading">
+          <div><p className="eyebrow">{t("Rental process")}</p><h2>{t("Rental requests")}</h2></div>
+        </div>
       <div className="rental-request-list">
         {requests.map((rentalRequest) =>
         <RentalRequestCard key={rentalRequest.id} request={rentalRequest} audience="student" onChanged={() => setRefresh((value) => value + 1)} />
         )}
       </div>
+      </section>}
     </section>);
 
+}
+
+function StudentCheckRequestCard({ request }) {
+  const [reportOpen, setReportOpen] = useState(false);
+  const shared = Boolean(request.shared_at && request.report);
+  const status = shared
+    ? t("Report shared")
+    : request.status === 'requested'
+      ? t("Awaiting assignment")
+      : request.status === 'assigned'
+        ? t("Inspector assigned")
+        : t("Company review pending");
+
+  return (
+    <article className="rental-request-card">
+      <div className="rental-request-heading">
+        <div>
+          <p className="eyebrow">{t("House condition check")}</p>
+          <h2>{request.house.title}</h2>
+          <span>{request.house.city}{t(", ")}{request.house.governorate}</span>
+        </div>
+        <span className={`request-status ${shared ? 'status-completed' : 'status-pending'}`}>{status}</span>
+      </div>
+      <p className="student-muted">{t("Requested ")}{formatDate(request.requested_at)}</p>
+      {request.status === 'assigned' && request.scheduled_at &&
+        <p className="student-muted">{t("Inspector visit scheduled: ")}{formatDate(request.scheduled_at)}</p>
+      }
+      {shared &&
+        <>
+          <button
+            className="primary-button"
+            type="button"
+            aria-expanded={reportOpen}
+            onClick={() => setReportOpen((open) => !open)}>
+            {reportOpen ? t("Close report") : t("Open report")}
+          </button>
+          {reportOpen && <StudentCheckReport report={request.report} houseTitle={request.house.title} />}
+          <Link className="primary-button" to={`/student/houses/${request.house.id}?rent=1`}>
+            {t("Rent this house")}
+          </Link>
+        </>
+      }
+    </article>
+  );
+}
+
+function PaymentObligationNotice({ obligation }) {
+  const includesInitialRent = obligation.type === 'student_rent_and_service_fee';
+
+  return (
+    <div className="fee-notice" role="status">
+      <strong>{t(includesInitialRent ? "First payment obligation: " : "Student service fee obligation: ")}{Number(obligation.amount).toFixed(3)} {obligation.currency}</strong>
+      {obligation.rent_amount !== null && obligation.rent_amount !== undefined &&
+        <span>{t("First month’s rent: ")}{Number(obligation.rent_amount).toFixed(3)} {obligation.currency}</span>
+      }
+      {obligation.service_fee_amount !== null && obligation.service_fee_amount !== undefined &&
+        <span>{t("One-time company service fee: ")}{Number(obligation.service_fee_amount).toFixed(3)} {obligation.currency}</span>
+      }
+      <span>{obligation.status === 'cancelled' ? t("This payment request was cancelled.") : t("Recorded as pending. Online payment is not configured; no money has been collected or sent.")}</span>
+    </div>
+  );
+}
+
+function StudentCheckReport({ report, houseTitle }) {
+  return (
+    <section className="public-inspection check-request-report">
+      <p className="eyebrow">{t("Company-reviewed inspection report")}</p>
+      <p><strong>{t("Inspector recommendation: ")}</strong>{t(report.recommendation.replaceAll('_', ' '))}</p>
+      <p><strong>{t("Inspection notes: ")}</strong>{report.notes}</p>
+      {report.defects_found && <p><strong>{t("Reported defects: ")}</strong>{report.defects_found}</p>}
+      {report.review_notes && <p><strong>{t("Company note: ")}</strong>{report.review_notes}</p>}
+      <ul className="submitted-checklist">
+        {Object.entries(report.checklist ?? {}).map(([item, status]) =>
+          <li key={item}><span>{t(item.replaceAll('_', ' '))}</span><strong>{t(status.replaceAll('_', ' '))}</strong></li>
+        )}
+      </ul>
+      {report.photos.length > 0 &&
+        <div className="house-photo-grid">
+          {report.photos.map((photo) =>
+            <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer">
+              <img src={photo.url} alt={photo.caption || `Inspection photo of ${houseTitle}`} />
+            </a>
+          )}
+        </div>
+      }
+    </section>
+  );
 }
 
 function StudentPaymentsPage() {
@@ -2572,6 +3167,7 @@ function OwnerRentalRequestsPage() {
 
 function RentalRequestCard({ request, audience, onChanged }) {
   const [busy, setBusy] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const owner = audience === 'owner';
@@ -2602,21 +3198,42 @@ function RentalRequestCard({ request, audience, onChanged }) {
       </div>
       <p className="student-muted">{t("Requested ")}{formatDate(request.requested_at)}</p>
       {owner && request.student && <div className="student-contact"><strong>{request.student.name}</strong><span>{request.student.email}{t(" · ")}{request.student.phone || 'No phone provided'}</span></div>}
+      {!owner && request.payment_obligation &&
+        <PaymentObligationNotice obligation={request.payment_obligation} />
+      }
+      {request.condition_report && <>
+        {request.condition_report.shared_at && request.condition_report.report ? <>
+          <p className="notice success-notice" role="status">{t("The administrator has shared the house condition report.")}</p>
+          {!owner && <>
+            <button
+              className="secondary-link"
+              type="button"
+              aria-expanded={reportOpen}
+              onClick={() => setReportOpen((open) => !open)}>
+              {reportOpen ? t("Close report") : t("Open house condition report")}
+            </button>
+            {reportOpen && <StudentCheckReport report={request.condition_report.report} houseTitle={request.house?.title || t("House")} />}
+          </>}
+        </> : <p className="notice report-pending-notice" role="status">
+          {request.condition_report.status === 'assigned'
+            ? t("The company has assigned an inspector. The owner can decide after the administrator shares the report.")
+            : request.condition_report.status === 'completed'
+              ? t("Inspection completed. The administrator is reviewing the report before sharing it.")
+              : t("The company will inspect the house. The owner can decide after the administrator shares the report.")}
+        </p>}
+      </>}
       {request.status === 'accepted' &&
       <div className="confirmation-summary">
           <span>{t("Student confirmation: ")}{request.student_confirmed_secured ? 'confirmed' : 'waiting'}</span>
           <span>{t("Owner confirmation: ")}{request.owner_confirmed_secured ? 'confirmed' : 'waiting'}</span>
         </div>
       }
-      {request.status === 'completed' &&
-      <p className="fee-due-message">{t("Rental secured. The ")}{Number(request.service_fee_tnd).toFixed(3)}{t(" TND student service fee is ")}{request.service_fee_payment_status === 'paid' ? 'paid' : 'due'}{t("; this platform has not processed a payment.")}</p>
-      }
       {notice && <p className="notice success-notice" role="status">{notice}</p>}
       <RequestError message={error} />
       <div className="rental-request-actions">
         {owner && request.status === 'pending' && <>
-          <button className="primary-button" type="button" disabled={busy} onClick={() => action(`${root}/${request.id}/decision`, { decision: 'accepted' })}>{t("Accept request")}</button>
-          <button className="secondary-link" type="button" disabled={busy} onClick={() => action(`${root}/${request.id}/decision`, { decision: 'rejected' })}>{t("Reject")}</button>
+          <button className="primary-button" type="button" disabled={busy || !request.condition_report?.shared_at} onClick={() => action(`${root}/${request.id}/decision`, { decision: 'accepted' })}>{t("Accept request")}</button>
+          <button className="secondary-link" type="button" disabled={busy || !request.condition_report?.shared_at} onClick={() => action(`${root}/${request.id}/decision`, { decision: 'rejected' })}>{t("Reject")}</button>
         </>}
         {owner && request.status === 'accepted' && !request.owner_confirmed_secured &&
         <button className="primary-button" type="button" disabled={busy} onClick={() => action(confirmPath, {})}>{t("Confirm rental secured")}</button>
@@ -2661,8 +3278,11 @@ function LogoutButton({ onLoggedOut }) {
 
   return (
     <div className="logout-area">
-      <button className="text-button" type="button" onClick={logout} disabled={submitting}>
-        {submitting ? 'Logging out…' : 'Log out'}
+      <button className="header-action-button logout-button" type="button" onClick={logout} disabled={submitting}>
+        <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false">
+          <path d="M8 3H4.5A1.5 1.5 0 0 0 3 4.5v11A1.5 1.5 0 0 0 4.5 17H8M12 6l4 4-4 4m4-4H7" />
+        </svg>
+        <span>{submitting ? t('Logging out…') : t('Log out')}</span>
       </button>
       {error && <RequestError message={error} />}
     </div>);
@@ -2670,19 +3290,25 @@ function LogoutButton({ onLoggedOut }) {
 }
 
 function LanguageToggle({ language, onChange }) {
-  const nextLanguage = language === 'en' ? 'fr' : 'en';
-  const label = nextLanguage === 'fr' ? 'Passer en français' : 'Switch to English';
-
   return (
-    <button
-      className="language-toggle"
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={() => onChange(nextLanguage)}
-    >
-      {nextLanguage === 'fr' ? 'FR' : 'EN'}
-    </button>
+    <div className="language-switcher" role="group" aria-label={t('Language')}>
+      <button
+        className={`language-option ${language === 'en' ? 'language-option-active' : ''}`}
+        type="button"
+        aria-label={t('English')}
+        aria-pressed={language === 'en'}
+        onClick={() => onChange('en')}>
+        EN
+      </button>
+      <button
+        className={`language-option ${language === 'fr' ? 'language-option-active' : ''}`}
+        type="button"
+        aria-label={t('French')}
+        aria-pressed={language === 'fr'}
+        onClick={() => onChange('fr')}>
+        FR
+      </button>
+    </div>
   );
 }
 
@@ -2691,15 +3317,19 @@ function MaintenanceNotifications({ user }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [error, setError] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!user) return;
+    setLoading(true);
+    setError('');
     apiRequest('/api/maintenance-notifications').
     then((data) => {
       setNotifications(data.notifications);
       setUnreadCount(data.unread_count);
     }).
-    catch((requestError) => setError(requestError.message));
+    catch((requestError) => setError(requestError.message)).
+    finally(() => setLoading(false));
   }, [refresh, user]);
 
   async function markRead(notificationId) {
@@ -2714,21 +3344,146 @@ function MaintenanceNotifications({ user }) {
 
   return (
     <details className="notification-menu">
-      <summary aria-label={`Maintenance notifications, ${unreadCount} unread`}>{t("\n        Notifications")}
-        {unreadCount > 0 && <span className="notification-count">{unreadCount}</span>}
+      <summary
+        className="header-action-button notification-trigger"
+        aria-label={unreadCount > 0 ? `${t('Notifications')}: ${unreadCount} ${t('unread notifications')}` : t('Notifications')}
+        title={t('Notifications')}>
+        <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false">
+          <path d="M15 7.5a5 5 0 0 0-10 0c0 5-2 5.5-2 7h14c0-1.5-2-2-2-7ZM8 17h4" />
+        </svg>
+        <span className="notification-label">{t('Notifications')}</span>
+        {unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </summary>
       <div className="notification-popover">
+        <div className="notification-popover-heading">
+          <strong>{t('Notifications')}</strong>
+          {unreadCount > 0 && <span>{unreadCount} {t('unread notifications')}</span>}
+        </div>
         {error && <RequestError message={error} />}
-        {notifications.length === 0 && <p className="student-muted">{t("No maintenance notifications yet.")}</p>}
+        {loading && <p className="student-muted">{t('Loading notifications…')}</p>}
+        {!loading && notifications.length === 0 && <p className="student-muted">{t("No maintenance notifications yet.")}</p>}
         {notifications.map((notification) =>
         <article className={`notification-item ${notification.read_at ? '' : 'notification-unread'}`} key={notification.id}>
             <p>{notification.message}</p>
-            <div><time>{formatDate(notification.created_at)}</time>{!notification.read_at && <button className="text-button" type="button" onClick={() => markRead(notification.id)}>{t("Mark read")}</button>}</div>
+            <div>
+              <time>{formatDate(notification.created_at)}</time>
+              {!notification.read_at &&
+                <button className="notification-mark-read" type="button" onClick={() => markRead(notification.id)}>
+                  {t('Mark read')}
+                </button>}
+            </div>
           </article>
         )}
       </div>
     </details>);
 
+}
+
+function OwnerRentPaymentNotifications({ user }) {
+  const [notifications, setNotifications] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [error, setError] = useState('');
+  const [refresh, setRefresh] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    setError('');
+    Promise.all([
+      apiRequest('/api/owner/rent-payment-reminders'),
+      apiRequest('/api/owner/rental-notifications'),
+      apiRequest('/api/owner/condition-report-notifications')
+    ]).
+    then(([reminderData, rentalData, conditionData]) => {
+      const rentReminders = reminderData.reminders.map((item) => ({
+        ...item,
+        kind: 'reminder',
+        notificationKey: `reminder-${item.id}`
+      }));
+      const rentalNotifications = rentalData.notifications.map((item) => ({
+        ...item,
+        kind: 'rental',
+        notificationKey: `rental-${item.id}`
+      }));
+      const conditionNotifications = conditionData.notifications.map((item) => ({
+        ...item,
+        kind: 'condition',
+        notificationKey: `condition-${item.id}`
+      }));
+      setNotifications([...rentReminders, ...rentalNotifications, ...conditionNotifications].sort((left, right) =>
+        new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+      ));
+      setUnreadCount(reminderData.unread_count + rentalData.unread_count + conditionData.unread_count);
+    }).
+    catch((requestError) => setError(requestError.message)).
+    finally(() => setLoading(false));
+
+    const intervalId = window.setInterval(() => {
+      setRefresh((value) => value + 1);
+    }, 30000);
+    return () => window.clearInterval(intervalId);
+  }, [refresh, user]);
+
+  async function markRead(notification) {
+    setError('');
+    try {
+      const endpoint = notification.kind === 'condition'
+        ? `/api/owner/condition-report-notifications/${notification.id}/read`
+        : notification.kind === 'rental'
+          ? `/api/owner/rental-notifications/${notification.id}/read`
+          : `/api/owner/rent-payment-reminders/${notification.id}/read`;
+      await apiRequest(endpoint, { method: 'POST' });
+      setRefresh((value) => value + 1);
+    } catch (requestError) {
+      setError(requestError.message);
+    }
+  }
+
+  return (
+    <details className="notification-menu">
+      <summary
+        className="header-action-button notification-trigger"
+        aria-label={unreadCount > 0 ? `${t('Owner notifications')}: ${unreadCount} ${t('unread notifications')}` : t('Owner notifications')}
+        title={t('Owner notifications')}>
+        <svg aria-hidden="true" viewBox="0 0 20 20" focusable="false">
+          <path d="M15 7.5a5 5 0 0 0-10 0c0 5-2 5.5-2 7h14c0-1.5-2-2-2-7ZM8 17h4" />
+        </svg>
+        <span className="notification-label">{t('Owner notifications')}</span>
+        {unreadCount > 0 && <span className="notification-count">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+      </summary>
+      <div className="notification-popover">
+        <div className="notification-popover-heading">
+          <strong>{t('Owner notifications')}</strong>
+          {unreadCount > 0 && <span>{unreadCount} {t('unread notifications')}</span>}
+        </div>
+        <p className="student-muted">{t('Sakani does not collect or transfer rent. Arrange payment directly until a secure provider is configured.')}</p>
+        {error && <RequestError message={error} />}
+        {loading && <p className="student-muted">{t('Loading rent reminders…')}</p>}
+        {!loading && notifications.length === 0 && <p className="student-muted">{t('No owner notifications yet.')}</p>}
+        {notifications.map((notification) =>
+          <article className={`notification-item ${notification.read_at ? '' : 'notification-unread'}`} key={notification.notificationKey}>
+            {notification.kind === 'condition' ? <>
+              <p><strong>{t('House condition report: {house}').replace('{house}', notification.house_title)}</strong></p>
+              <p>{t('Reported damage: {details}').replace('{details}', notification.defects_found)}</p>
+              {notification.notes && <p>{notification.notes}</p>}
+              {notification.review_notes && <p>{t('Administrator note: {notes}').replace('{notes}', notification.review_notes)}</p>}
+            </> : <p>{notification.kind === 'rental'
+                ? t('Your rent is okay. Monthly rent: {amount} TND for {student} at {house}. This is not a payment confirmation.')
+                  .replace('{amount}', Number(notification.amount_tnd).toFixed(3))
+                  .replace('{student}', notification.student_name)
+                  .replace('{house}', notification.house_title)
+                : notification.message}</p>}
+            <div>
+              <time>{formatDate(notification.reviewed_at ?? notification.due_date ?? notification.created_at)}</time>
+              {!notification.read_at &&
+                <button className="notification-mark-read" type="button" onClick={() => markRead(notification)}>
+                  {t('Mark read')}
+                </button>}
+            </div>
+          </article>
+        )}
+      </div>
+    </details>);
 }
 
 export default App;

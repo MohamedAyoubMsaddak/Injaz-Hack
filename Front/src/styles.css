@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   font-family: 'Segoe UI', Arial, sans-serif;
   color: #212b26;
   background: #f5f5f1;
@@ -226,6 +226,9 @@ a { color: var(--green); }
 .primary-button:hover:not(:disabled) { transform: translateY(-1px); background: var(--green-dark); }
 .primary-button:disabled { cursor: not-allowed; opacity: .6; }
 .primary-button span { font-size: 19px; font-weight: 400; }
+.danger-button { min-height: 38px; padding: 0 13px; border: 1px solid #d9a39a; border-radius: 8px; background: #fff7f5; color: #963f33; cursor: pointer; font-size: 11px; font-weight: 700; }
+.danger-button:hover:not(:disabled) { border-color: #bd6b5d; background: #fff0ed; }
+.danger-button:disabled { cursor: wait; opacity: .6; }
 .form-note { margin: -6px 0 0; font-size: 11px; text-align: center; }
 .photo-preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 9px; }
 .photo-preview-grid figure { min-width: 0; margin: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: #f7f9f6; }
@@ -291,6 +294,10 @@ a { color: var(--green); }
 .house-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px; }
 .house-card { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: white; }
 .house-card-image { display: grid; width: 100%; height: 175px; object-fit: cover; }
+.house-card-gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; padding: 6px; }
+.house-card-gallery img { display: block; width: 100%; height: 92px; border-radius: 7px; object-fit: cover; background: #f1f4f0; }
+.house-card-gallery img:only-child { grid-column: 1 / -1; height: 175px; }
+.marketplace-house-gallery-link { display: block; color: inherit; text-decoration: none; }
 .house-image-placeholder { place-items: center; background: linear-gradient(140deg, #eaf1ea, #f5eee7); color: #68816d; font-size: 38px; }
 .house-card-content { padding: 15px; }
 .house-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
@@ -328,6 +335,13 @@ a { color: var(--green); }
 .house-card-actions { display: flex; gap: 15px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #eff1ed; }
 .house-card-actions a { color: var(--green); font-size: 11px; font-weight: 700; text-decoration: none; }
 .house-card-actions a:hover { text-decoration: underline; }
+.owner-house-actions { align-items: center; gap: 11px 15px; }
+.owner-house-actions > a { flex: 0 0 auto; }
+.owner-delete-request-button { display: inline-flex; min-height: 36px; align-items: center; justify-content: center; gap: 7px; margin-left: auto; padding: 0 11px; border: 1px solid #eadcc9; border-radius: 9px; background: #fffaf3; color: #795c34; cursor: pointer; font-size: 11px; font-weight: 700; transition: background .15s ease, border-color .15s ease, color .15s ease; }
+.owner-delete-request-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
+.owner-delete-request-button:hover:not(:disabled) { border-color: #d7b98c; background: #fbf1e2; color: #664620; }
+.owner-delete-request-button:disabled { cursor: wait; opacity: .65; }
+.owner-stat-grid.owner-dashboard-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .house-details-card, .house-form-card { padding: 21px; border: 1px solid var(--line); border-radius: 14px; background: white; }
 .house-details-card > p:not(.house-detail-location) { color: #58635a; font-size: 13px; line-height: 1.7; }
 .house-detail-list { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 20px 0; }
@@ -336,6 +350,13 @@ a { color: var(--green); }
 .house-detail-list dd { margin: 5px 0 0; color: #314c3a; font-size: 12px; font-weight: 700; text-transform: capitalize; }
 .house-photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .house-photo-grid img { width: 100%; height: 150px; border-radius: 9px; object-fit: cover; }
+.my-house-card { display: grid; gap: 14px; }
+.my-house-card .house-detail-list { margin: 0; }
+.my-house-description { margin: 0; color: #58635a; font-size: 13px; line-height: 1.65; }
+.move-out-report-form { max-width: none; padding: 16px; }
+.move-out-report-message { display: grid; gap: 8px; padding: 14px; border-radius: 10px; background: #f5f7f4; color: #455349; font-size: 12px; }
+.move-out-report-message p { margin: 0; line-height: 1.6; white-space: pre-wrap; }
+.move-out-report-message span { color: #788179; font-size: 11px; }
 .house-form-card { display: flex; max-width: 720px; flex-direction: column; gap: 16px; }
 .house-form-card textarea, .house-form-card select { width: 100%; min-height: 43px; padding: 10px 12px; border: 1px solid #e1e6e1; border-radius: 9px; outline: none; background: #fdfefd; color: #26352c; font: inherit; font-size: 13px; }
 .house-form-card textarea { resize: vertical; }
@@ -429,6 +450,28 @@ a { color: var(--green); }
 .marketplace-house-card > a { display: block; }
 .marketplace-house-card .house-card-actions { align-items: center; justify-content: space-between; }
 .marketplace-house-card .house-card-actions span { color: #788179; font-size: 10px; }
+.marketplace-action-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 14px; padding-top: 14px; border-top: 1px solid #edf0ec; }
+.marketplace-check-action, .marketplace-rent-action { display: flex; min-width: 0; flex-direction: column; align-items: stretch; gap: 8px; }
+.marketplace-action-grid .primary-button { width: 100%; min-height: 48px; padding: 9px 10px; font-size: 11px; line-height: 1.35; }
+.marketplace-check-action > a, .marketplace-rent-action > a, .marketplace-report-link { color: #315e40; font-size: 11px; font-weight: 700; text-decoration: underline; }
+.marketplace-action-grid button:disabled { cursor: not-allowed; opacity: .65; }
+.pending-deletion-notice { margin: 12px 0 0; padding: 9px 11px; color: #745821; font-size: 12px; }
+.marketplace-action-grid .student-muted { min-height: 35px; }
+.rental-checkout-dialog { position: relative; width: min(calc(100% - 32px), 480px); max-height: min(90vh, 720px); margin: auto; padding: 28px; overflow: auto; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 24px 80px rgba(14, 30, 19, .25); }
+.rental-checkout-dialog::backdrop { background: rgba(20, 32, 25, .58); }
+.rental-checkout-dialog h2 { margin: 4px 30px 20px 0; color: #304638; font-family: Georgia, 'Times New Roman', serif; font-size: 24px; font-weight: 500; }
+.rental-dialog-close { position: absolute; top: 13px; right: 15px; width: 36px; height: 36px; border: 0; border-radius: 50%; background: #f2f5f1; color: #435449; font-size: 24px; cursor: pointer; }
+.rental-dialog-breakdown { display: grid; gap: 12px; padding: 15px; border-radius: 11px; background: #f6f8f5; color: #58635a; font-size: 13px; }
+.rental-dialog-breakdown > div { display: flex; justify-content: space-between; gap: 12px; }
+.rental-dialog-breakdown strong { color: #304638; white-space: nowrap; }
+.rental-dialog-breakdown .rental-dialog-total { padding-top: 12px; border-top: 1px solid #dfe6df; color: #27392d; font-size: 15px; font-weight: 700; }
+.rental-dialog-warning { margin: 16px 0; padding: 12px; border: 1px solid #eadfc6; border-radius: 10px; background: #fffaf1; color: #755b2e; font-size: 12px; line-height: 1.6; }
+.rental-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.rental-dialog-actions button { min-height: 42px; }
+.rental-dialog-actions .primary-button { padding: 10px 15px; }
+.rental-dialog-cancel { padding: 9px 15px; border: 1px solid #dce3dc; border-radius: 9px; background: #fff; color: #435449; font-size: 12px; font-weight: 700; cursor: pointer; }
+.rental-dialog-cancel:hover { background: #f6f8f5; }
+.rental-dialog-actions button:disabled { cursor: not-allowed; opacity: .65; }
 .marketplace-results { margin-top: 3px; }
 .pagination-controls { display: flex; align-items: center; justify-content: center; gap: 15px; padding: 12px 0; color: #69746b; font-size: 11px; }
 .pagination-controls button { min-height: 36px; cursor: pointer; }
@@ -438,6 +481,9 @@ a { color: var(--green); }
 .public-inspection > .eyebrow { margin-bottom: 4px; }
 .public-defects { padding: 12px; border-radius: 9px; background: #fff8f2; color: #604d3e; font-size: 11px; }
 .public-defects p { margin: 6px 0 0; line-height: 1.55; }
+.student-check-request { display: grid; gap: 12px; margin-top: 20px; padding: 16px; border: 1px solid #dce8dd; border-radius: 12px; background: #f8fbf7; }
+.student-check-request h3 { margin: 3px 0 5px; color: #304638; font-size: 16px; }
+.student-check-request .primary-button, .student-check-request .secondary-link { justify-self: start; }
 .student-request-action { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-top: 19px; padding-top: 16px; border-top: 1px solid #edf0ec; }
 .student-request-action > div { display: flex; flex-direction: column; gap: 5px; }
 .student-request-action strong { color: #34513c; font-size: 12px; }
@@ -461,6 +507,8 @@ a { color: var(--green); }
 .rental-request-actions { display: flex; flex-wrap: wrap; gap: 9px; }
 .rental-request-actions button { min-height: 38px; justify-content: center; font-size: 11px; }
 .rental-request-actions .primary-button { min-width: 150px; }
+.rental-request-card > .primary-button { justify-self: start; min-height: 40px; }
+.check-request-report { margin-top: 0; }
 .student-account-card { gap: 13px; }
 .student-account-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 0; }
 .student-account-card dl div { display: flex; flex-direction: column; gap: 5px; padding: 11px; border-radius: 8px; background: #f5f7f4; }
@@ -920,4 +968,180 @@ body { background: var(--cream); color: #343326; }
   .owner-nav-link { padding: 9px 11px; font-size: 11px; }
   .owner-stat { padding: 13px; }
   .house-card-image { height: 185px; }
+  .owner-house-actions { gap: 12px; }
+  .owner-delete-request-button { width: 100%; margin-left: 0; }
+  .marketplace-action-grid { grid-template-columns: 1fr; }
+  .rental-checkout-dialog { padding: 24px 18px; }
+}
+
+.authenticated-header-actions {
+  gap: 8px;
+  padding: 5px;
+  border: 1px solid #ded8c9;
+  border-radius: 14px;
+  background: rgba(251, 249, 243, .9);
+  box-shadow: 0 5px 16px rgba(70, 67, 44, .06);
+}
+
+.header-action-button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 13px;
+  border: 1px solid #d8d2c3;
+  border-radius: 10px;
+  background: #fffdf8;
+  color: #344a3a;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: background .18s ease, border-color .18s ease, transform .18s ease;
+}
+
+.header-action-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #aeb9a3;
+  background: #f0eddf;
+}
+
+.header-action-button:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.header-action-button svg {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.language-switcher {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid #ded8c9;
+  border-radius: 10px;
+  background: #f0eddf;
+}
+
+.language-option {
+  min-width: 37px;
+  min-height: 34px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: #6b6958;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.language-option:hover { background: #e6e2d4; color: #344a3a; }
+.language-option-active { background: var(--green); color: #fffdf4; box-shadow: 0 2px 5px rgba(32, 58, 42, .18); }
+.language-option-active:hover { background: var(--green-dark); color: #fffdf4; }
+
+.logout-area { gap: 8px; }
+.logout-button { border-color: #b8c8b5; background: #e8eee5; color: #254b35; }
+.logout-button:hover:not(:disabled) { border-color: #93aa91; background: #dde8da; }
+
+.notification-menu summary { list-style: none; }
+.notification-menu summary::-webkit-details-marker { display: none; }
+.notification-trigger { position: relative; }
+.notification-count {
+  min-width: 21px;
+  height: 21px;
+  background: #a34e32;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.notification-menu[open] .notification-trigger {
+  border-color: #9caa8e;
+  background: #ecebdc;
+}
+
+.notification-popover {
+  top: calc(100% + 10px);
+  right: 0;
+  gap: 9px;
+  padding: 13px;
+  border-color: #ded8c9;
+  border-radius: 15px;
+  background: #fbf9f3;
+}
+
+.notification-popover-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 3px 2px 9px;
+  border-bottom: 1px solid #e7e2d5;
+  color: #3f402f;
+  font-size: 13px;
+}
+
+.notification-popover-heading > span {
+  color: #777563;
+  font-size: 10px;
+}
+
+.notification-mark-read {
+  padding: 6px 9px;
+  border: 1px solid #ccd8c9;
+  border-radius: 7px;
+  background: #f1f5ee;
+  color: #34593f;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.notification-mark-read:hover { background: #e4ede1; }
+
+@media (max-width: 760px) {
+  .authenticated-header-actions { gap: 6px; }
+  .header-action-button { min-height: 40px; padding: 0 10px; }
+  .language-switcher { min-height: 40px; }
+}
+
+@media (max-width: 520px) {
+  .site-header {
+    height: auto;
+    min-height: 66px;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 9px 0;
+  }
+
+  .authenticated-header-actions {
+    width: 100%;
+    justify-content: flex-end;
+    margin-left: 0;
+  }
+
+  .notification-popover {
+    right: -5px;
+    width: min(360px, calc(100vw - 24px));
+  }
+}
+
+@media (max-width: 360px) {
+  .authenticated-header-actions { gap: 4px; padding: 4px; }
+  .header-action-button { gap: 5px; padding: 0 8px; font-size: 11px; }
+  .language-option { min-width: 32px; }
 }

@@ -59,6 +59,11 @@ class User extends Authenticatable
         return $this->hasMany(InspectionReport::class, 'worker_id');
     }
 
+    public function inspectionReportsAsStudent(): HasMany
+    {
+        return $this->hasMany(InspectionReport::class, 'requested_by_student_id');
+    }
+
     public function maintenanceRequestsAssigned(): HasMany
     {
         return $this->hasMany(MaintenanceRequest::class, 'assigned_worker_id');

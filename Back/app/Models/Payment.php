@@ -11,6 +11,8 @@ class Payment extends Model
 
     public const TYPE_STUDENT_SERVICE_FEE = 'student_service_fee';
 
+    public const TYPE_STUDENT_RENT_AND_SERVICE_FEE = 'student_rent_and_service_fee';
+
     public const STATUS_PENDING = 'pending';
 
     public const STATUS_PROCESSING = 'processing';
